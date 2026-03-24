@@ -27,7 +27,7 @@ export interface ResumeItem {
 // Background message types
 export type BgMessage =
   | { type: 'FETCH_RESUMES' }
-  | { type: 'DOWNLOAD_PDF'; payload: { resumeContent: string; company: string; jobTitle: string } }
+  | { type: 'DOWNLOAD_PDF'; payload: { applicationId: string } }
 
 export type BgResponse<T = unknown> =
   | { data: T }
@@ -35,7 +35,15 @@ export type BgResponse<T = unknown> =
 
 // Port message types (streaming generation)
 export type PortInMessage = { type: 'START'; payload: GenerateRequest }
+export interface StreamEvent {
+  type: string
+  content?: string
+  resumeText?: string
+  coverLetterText?: string
+  applicationId?: string
+}
+
 export type PortOutMessage =
-  | { type: 'chunk'; event: { event: string; content?: string } }
+  | { type: 'chunk'; event: StreamEvent }
   | { type: 'done' }
   | { type: 'error'; status?: number; message?: string }

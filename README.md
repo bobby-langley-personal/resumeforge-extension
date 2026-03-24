@@ -117,6 +117,38 @@ Change this to `http://localhost:3000` for local ResumeForge development.
 
 ---
 
+## Debugging
+
+Chrome DevTools for an extension has two separate contexts — it's easy to look in the wrong place.
+
+### Side panel DevTools (UI layer)
+Right-click inside the side panel → **Inspect**. This shows:
+- React state and component errors in the Console
+- Network tab shows the side panel's own resource loads (JS/CSS bundles). These appear as `(invalid)` — that's normal, it's Chrome not knowing how to display `chrome-extension://` resource loads. Not errors.
+- `chrome.runtime.sendMessage` and port messages do NOT appear here — they're IPC, not HTTP
+
+### Service worker DevTools (API layer)
+This is where the actual fetch calls to `resume-forge-rho.vercel.app` happen:
+1. Go to `chrome://extensions`
+2. Find ResumeForge → click **"Service Worker"** (the blue inspect link)
+3. Open the **Network** tab
+
+All API calls (`/api/resumes`, `/api/generate-documents`, `/api/download-pdf`) will appear here with their real status codes. This is the right place to debug auth failures (401), CORS issues, or API errors.
+
+### Auth / 401 errors
+The extension uses `credentials: 'include'` on all fetch calls from the service worker, which picks up the Clerk session cookie automatically. If you see 401:
+1. Open `https://resume-forge-rho.vercel.app` in Chrome and sign in
+2. Go back to `chrome://extensions` → click the **reload icon** on ResumeForge
+3. Reopen the side panel
+
+### After any code change
+```
+npm run build
+```
+Then go to `chrome://extensions` → click the **reload icon** on ResumeForge. The side panel will pick up the new build automatically on next open.
+
+---
+
 ## Related
 
 - [ResumeForge web app](https://github.com/bobby-langley-personal/ResumeForge)

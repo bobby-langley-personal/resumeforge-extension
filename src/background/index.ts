@@ -21,11 +21,12 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
   }
 
   if (message.type === 'DOWNLOAD_PDF') {
+    const { applicationId } = message.payload
     fetch(`${API_BASE}/api/download-pdf/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify(message.payload),
+      body: JSON.stringify({ applicationId }),
     })
       .then(async (res) => {
         if (!res.ok) return sendResponse({ error: res.status })
@@ -81,7 +82,7 @@ chrome.runtime.onConnect.addListener((port) => {
           const raw = line.slice(6).trim()
           if (!raw || raw === '[DONE]') continue
           try {
-            const event = JSON.parse(raw) as { event: string; content?: string }
+            const event = JSON.parse(raw) as { type: string; content?: string; resumeText?: string; coverLetterText?: string; applicationId?: string }
             port.postMessage({ type: 'chunk', event })
           } catch {
             // non-JSON line, skip

@@ -64,6 +64,8 @@ export default function App() {
   const [coverLetter, setCoverLetter] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  const [applicationId, setApplicationId] = useState<string | null>(null)
+
   // Result actions
   const [copied, setCopied] = useState<'resume' | 'cover' | null>(null)
   const [downloading, setDownloading] = useState(false)
@@ -158,10 +160,20 @@ export default function App() {
 
     port.onMessage.addListener((msg: PortOutMessage) => {
       if (msg.type === 'chunk') {
-        const { event, content } = msg.event
-        if (event === 'resume_chunk' && content) setResume((p) => p + content)
-        if (event === 'cover_letter_chunk' && content) setCoverLetter((p) => p + content)
+        const ev = msg.event
+        if (ev.type === 'resume_chunk' && ev.content) setResume((p) => p + ev.content)
+        if (ev.type === 'cover_letter_chunk' && ev.content) setCoverLetter((p) => p + ev.content)
+        if (ev.type === 'done') {
+          // Final done event carries full text + applicationId
+          if (ev.resumeText) setResume(ev.resumeText)
+          if (ev.coverLetterText) setCoverLetter(ev.coverLetterText)
+          if (ev.applicationId) setApplicationId(ev.applicationId)
+          port.disconnect()
+          setStep('done')
+          setActiveTab('resume')
+        }
       } else if (msg.type === 'done') {
+        // Stream ended without a done event — mark complete anyway
         port.disconnect()
         setStep('done')
         setActiveTab('resume')
@@ -181,20 +193,18 @@ export default function App() {
   }
 
   async function downloadPdf() {
-    if (!job || !resume) return
+    if (!applicationId) {
+      window.open(`${API_BASE}/dashboard`, '_blank')
+      return
+    }
     setDownloading(true)
     try {
       const response = await chrome.runtime.sendMessage({
         type: 'DOWNLOAD_PDF',
-        payload: {
-          resumeContent: resume,
-          company: job.company ?? '',
-          jobTitle: job.title ?? '',
-        },
+        payload: { applicationId },
       }) as { data: string } | { error: number | string }
 
       if ('error' in response) {
-        // PDF endpoint may require saved application ID — open dashboard as fallback
         window.open(`${API_BASE}/dashboard`, '_blank')
         return
       }
@@ -206,7 +216,7 @@ export default function App() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${job.company ?? 'resume'}_${job.title ?? ''}.pdf`.replace(/\s+/g, '_')
+      a.download = `${job?.company ?? 'resume'}_${job?.title ?? ''}.pdf`.replace(/\s+/g, '_')
       a.click()
       URL.revokeObjectURL(url)
     } finally {
