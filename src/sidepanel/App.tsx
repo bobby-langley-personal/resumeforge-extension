@@ -1,6 +1,52 @@
 import { useState } from 'react'
 import { FileText, Loader2 } from 'lucide-react'
-import type { ScrapedJob, MessageRequest, MessageResponse } from '../types'
+import type { ScrapedJob } from '../types'
+
+// Runs inside the page context via executeScript — no imports allowed
+function scrapePageContent(): ScrapedJob {
+  const url = window.location.href
+
+  if (url.includes('linkedin.com/jobs')) {
+    return {
+      title: document.querySelector('.job-details-jobs-unified-top-card__job-title')?.textContent?.trim(),
+      company: document.querySelector('.job-details-jobs-unified-top-card__company-name')?.textContent?.trim(),
+      description: document.querySelector('.jobs-description__content')?.textContent?.trim(),
+      url,
+    }
+  }
+
+  if (url.includes('greenhouse.io')) {
+    return {
+      title: document.querySelector('h1.app-title')?.textContent?.trim(),
+      company: document.querySelector('.company-name')?.textContent?.trim(),
+      description: document.querySelector('#content')?.textContent?.trim(),
+      url,
+    }
+  }
+
+  if (url.includes('jobs.lever.co')) {
+    return {
+      title: document.querySelector('.posting-headline h2')?.textContent?.trim(),
+      company: document.querySelector('.posting-headline .company-name')?.textContent?.trim(),
+      description: document.querySelector('.posting-description')?.textContent?.trim(),
+      url,
+    }
+  }
+
+  if (url.includes('myworkdayjobs.com') || url.includes('workday.com')) {
+    return {
+      title: document.querySelector('[data-automation-id="jobPostingHeader"]')?.textContent?.trim(),
+      description: document.querySelector('[data-automation-id="job-posting-details"]')?.textContent?.trim(),
+      url,
+    }
+  }
+
+  return {
+    title: document.title,
+    description: document.body.innerText.slice(0, 5000),
+    url,
+  }
+}
 
 export default function App() {
   const [job, setJob] = useState<ScrapedJob | null>(null)
@@ -15,11 +61,15 @@ export default function App() {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (!tab.id) throw new Error('No active tab found')
 
-      const response = await chrome.tabs.sendMessage<MessageRequest, MessageResponse>(tab.id, {
-        type: 'SCRAPE_JOB',
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: scrapePageContent,
       })
 
-      setJob(response.job)
+      const scraped = results[0]?.result
+      if (!scraped) throw new Error('Could not read page content')
+
+      setJob(scraped)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to read page')
     } finally {

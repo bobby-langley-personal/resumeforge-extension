@@ -5,6 +5,7 @@
   "description": "Tailor your resume to any job posting in seconds",
   "permissions": [
     "activeTab",
+    "scripting",
     "storage",
     "sidePanel"
   ],
