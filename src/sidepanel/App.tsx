@@ -97,6 +97,7 @@ export default function App() {
   // Result actions
   const [copied, setCopied] = useState<'resume' | 'cover' | null>(null)
   const [downloading, setDownloading] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
   const [activeTab, setActiveTab] = useState<'resume' | 'cover'>('resume')
   // Gap analysis
   const [fitAnalysis, setFitAnalysis] = useState<FitAnalysis | null>(null)
@@ -276,15 +277,23 @@ export default function App() {
   }
 
   async function openPreview() {
-    await chrome.storage.local.set({
-      resumeforge_preview: {
-        resumeText: resume,
-        coverLetterText: coverLetter || undefined,
-        company: job?.company,
-        jobTitle: job?.title,
-      },
-    })
-    chrome.tabs.create({ url: chrome.runtime.getURL('src/preview/index.html') })
+    if (!applicationId) return
+    setPreviewing(true)
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'DOWNLOAD_PDF',
+        payload: { applicationId },
+      }) as { data: string } | { error: number | string }
+
+      if ('error' in response) {
+        window.open(`${API_BASE}/dashboard`, '_blank')
+        return
+      }
+      await chrome.storage.local.set({ resumeforge_pdf_preview: response.data })
+      chrome.tabs.create({ url: chrome.runtime.getURL('src/preview/index.html') })
+    } finally {
+      setPreviewing(false)
+    }
   }
 
   async function analyzeGap() {
@@ -653,10 +662,11 @@ export default function App() {
                   </button>
                   <button
                     onClick={openPreview}
-                    title="Open full preview"
-                    className="flex items-center justify-center px-2.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 transition-colors"
+                    disabled={!applicationId || previewing}
+                    title={applicationId ? 'Open PDF preview' : 'Preview available after generation completes'}
+                    className="flex items-center justify-center px-2.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
-                    <Eye className="w-3.5 h-3.5" />
+                    {previewing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
                   <button
                     onClick={downloadPdf}
