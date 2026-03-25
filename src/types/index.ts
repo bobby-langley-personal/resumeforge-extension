@@ -24,10 +24,25 @@ export interface ResumeItem {
   content: { text: string; fileName?: string }
 }
 
+export interface FitPoint {
+  point: string
+  source?: string
+}
+
+export interface FitAnalysis {
+  overallFit: 'Strong Fit' | 'Good Fit' | 'Stretch Role'
+  strengths: FitPoint[]
+  gaps: FitPoint[]
+  suggestions: FitPoint[]
+  plannedImprovements: string[]
+  roleType: 'technical' | 'management' | 'sales' | 'customer_success' | 'research' | 'other'
+}
+
 // Background message types
 export type BgMessage =
   | { type: 'FETCH_RESUMES' }
   | { type: 'DOWNLOAD_PDF'; payload: { applicationId: string } }
+  | { type: 'ANALYZE_FIT'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; additionalContext?: { title: string; type: string; text: string }[] } }
 
 export type BgResponse<T = unknown> =
   | { data: T }

@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   FileText, Loader2, Copy, Check, Download,
-  ChevronLeft, AlertCircle, ExternalLink,
+  ChevronLeft, AlertCircle, ExternalLink, Lightbulb,
 } from 'lucide-react'
-import type { ScrapedJob, ResumeItem, PortOutMessage } from '../types'
+import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis } from '../types'
 
 const API_BASE = 'https://resume-forge-rho.vercel.app'
 
@@ -44,6 +44,60 @@ function scrapePageContent(): ScrapedJob {
   return { title: document.title, description: document.body.innerText.slice(0, 5000), url }
 }
 
+// ── Resume preview formatter ──────────────────────────────────────────────────
+function ResumePreview({ text }: { text: string }) {
+  const lines = text.split('\n')
+  return (
+    <div className="text-xs leading-relaxed font-sans">
+      {lines.map((line, i) => {
+        const t = line.trim()
+        if (!t) return <div key={i} className="h-2" />
+        // Section header: all-caps word(s), no bullet, short
+        if (/^[A-Z][A-Z\s&/]+$/.test(t) && t.length <= 40 && !t.startsWith('•')) {
+          return (
+            <p key={i} className="text-zinc-100 font-bold border-b border-zinc-700 pb-0.5 mt-4 mb-1 tracking-wide uppercase text-[10px]">
+              {t}
+            </p>
+          )
+        }
+        // Bullet points
+        if (t.startsWith('•')) {
+          return <p key={i} className="text-zinc-300 pl-3">{t}</p>
+        }
+        // Pipe-separated lines (company | location, role | dates)
+        if (t.includes(' | ')) {
+          return <p key={i} className="text-zinc-200 font-medium">{t}</p>
+        }
+        return <p key={i} className="text-zinc-400">{t}</p>
+      })}
+    </div>
+  )
+}
+
+// ── Fit analysis view ─────────────────────────────────────────────────────────
+const FIT_COLOR: Record<string, string> = {
+  'Strong Fit': 'text-green-400 border-green-700 bg-green-950/40',
+  'Good Fit':   'text-blue-400  border-blue-700  bg-blue-950/40',
+  'Stretch Role':'text-amber-400 border-amber-700 bg-amber-950/40',
+}
+
+function FitSection({ title, items, color }: { title: string; items: { point: string; source?: string }[]; color: string }) {
+  if (!items?.length) return null
+  return (
+    <div>
+      <p className={`text-[10px] font-bold uppercase tracking-wider mb-1.5 ${color}`}>{title}</p>
+      <ul className="space-y-1.5">
+        {items.map((item, i) => (
+          <li key={i} className="text-zinc-300 text-xs leading-snug">
+            <span className={`mr-1.5 ${color}`}>›</span>
+            {item.point}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 type Step = 'scrape' | 'input' | 'generating' | 'done'
 
 export default function App() {
@@ -70,6 +124,12 @@ export default function App() {
   const [copied, setCopied] = useState<'resume' | 'cover' | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [activeTab, setActiveTab] = useState<'resume' | 'cover'>('resume')
+  const [previewMode, setPreviewMode] = useState<'text' | 'formatted'>('text')
+
+  // Gap analysis
+  const [fitAnalysis, setFitAnalysis] = useState<FitAnalysis | null>(null)
+  const [analyzingFit, setAnalyzingFit] = useState(false)
+  const [showFitView, setShowFitView] = useState(false)
 
   const portRef = useRef<chrome.runtime.Port | null>(null)
 
@@ -231,6 +291,37 @@ export default function App() {
     setResume('')
     setCoverLetter('')
     setError(null)
+    setFitAnalysis(null)
+    setShowFitView(false)
+    setPreviewMode('text')
+  }
+
+  async function analyzeGap() {
+    if (fitAnalysis) { setShowFitView(true); return }
+    const payload = buildPayload()
+    if (!payload) return
+    setAnalyzingFit(true)
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'ANALYZE_FIT',
+        payload: {
+          company: payload.company,
+          jobTitle: payload.jobTitle,
+          jobDescription: payload.jobDescription,
+          backgroundExperience: payload.backgroundExperience,
+          additionalContext: payload.additionalContext,
+        },
+      }) as { data: FitAnalysis } | { error: number | string }
+
+      if ('error' in response) {
+        if (response.error === 401) setNeedsSignIn(true)
+        return
+      }
+      setFitAnalysis(response.data)
+      setShowFitView(true)
+    } finally {
+      setAnalyzingFit(false)
+    }
   }
 
   async function copy(text: string, which: 'resume' | 'cover') {
@@ -423,62 +514,147 @@ export default function App() {
       {/* ── STEP: DONE ── */}
       {step === 'done' && (
         <div className="flex flex-col flex-1 overflow-hidden">
-          {/* Tab bar */}
-          {coverLetter && (
-            <div className="flex border-b border-zinc-800 shrink-0">
-              {(['resume', 'cover'] as const).map((tab) => (
+
+          {/* ── Gap Analysis View ── */}
+          {showFitView ? (
+            <>
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0">
                 <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 py-2 text-xs font-medium transition-colors ${
-                    activeTab === tab
-                      ? 'text-zinc-100 border-b-2 border-blue-500'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
+                  onClick={() => setShowFitView(false)}
+                  className="text-zinc-600 hover:text-zinc-400 transition-colors"
                 >
-                  {tab === 'resume' ? 'Resume' : 'Cover Letter'}
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-              ))}
-            </div>
+                <Lightbulb className="w-3.5 h-3.5 text-yellow-400" />
+                <span className="text-xs font-medium text-zinc-200">Gap Analysis</span>
+                {fitAnalysis && (
+                  <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded border ${FIT_COLOR[fitAnalysis.overallFit] ?? ''}`}>
+                    {fitAnalysis.overallFit}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {fitAnalysis ? (
+                  <>
+                    {fitAnalysis.plannedImprovements?.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5">What was improved</p>
+                        <ul className="space-y-1">
+                          {fitAnalysis.plannedImprovements.map((item, i) => (
+                            <li key={i} className="text-zinc-300 text-xs leading-snug flex gap-1.5">
+                              <span className="text-zinc-500 shrink-0">→</span>
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <FitSection title="Strengths" items={fitAnalysis.strengths} color="text-green-400" />
+                    <FitSection title="Gaps" items={fitAnalysis.gaps} color="text-red-400" />
+                    <FitSection title="Suggestions" items={fitAnalysis.suggestions} color="text-blue-400" />
+                  </>
+                ) : (
+                  <div className="flex items-center justify-center h-20 text-zinc-600 text-xs">
+                    No analysis available
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Tab bar: resume/cover + text/formatted toggles */}
+              <div className="flex items-center border-b border-zinc-800 shrink-0">
+                {coverLetter ? (
+                  <>
+                    {(['resume', 'cover'] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                          activeTab === tab
+                            ? 'text-zinc-100 border-b-2 border-blue-500'
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {tab === 'resume' ? 'Resume' : 'Cover Letter'}
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <span className="flex-1 py-2 text-xs font-medium text-zinc-400 px-3">Resume</span>
+                )}
+                {/* Preview mode toggle */}
+                <div className="flex items-center gap-0.5 px-2 shrink-0">
+                  {(['text', 'formatted'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setPreviewMode(mode)}
+                      className={`px-2 py-1 rounded text-[10px] transition-colors ${
+                        previewMode === mode
+                          ? 'bg-zinc-700 text-zinc-100'
+                          : 'text-zinc-600 hover:text-zinc-400'
+                      }`}
+                    >
+                      {mode === 'text' ? 'Text' : 'Preview'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-4">
+                {previewMode === 'text' ? (
+                  <pre className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap font-mono">
+                    {activeTab === 'resume' ? resume : coverLetter}
+                  </pre>
+                ) : (
+                  <ResumePreview text={activeTab === 'resume' ? resume : coverLetter} />
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="p-3 border-t border-zinc-800 flex flex-col gap-2 shrink-0">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => copy(activeTab === 'resume' ? resume : coverLetter, activeTab === 'resume' ? 'resume' : 'cover')}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
+                  >
+                    {copied === (activeTab === 'resume' ? 'resume' : 'cover')
+                      ? <><Check className="w-3.5 h-3.5 text-green-400" />Copied</>
+                      : <><Copy className="w-3.5 h-3.5" />Copy text</>
+                    }
+                  </button>
+                  <button
+                    onClick={downloadPdf}
+                    disabled={downloading}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-medium transition-colors"
+                  >
+                    {downloading
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Downloading...</>
+                      : <><Download className="w-3.5 h-3.5" />Download PDF</>
+                    }
+                  </button>
+                </div>
+                <button
+                  onClick={analyzeGap}
+                  disabled={analyzingFit}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded border border-yellow-800/60 hover:border-yellow-700 text-yellow-400 hover:text-yellow-300 disabled:opacity-50 text-xs transition-colors"
+                >
+                  {analyzingFit
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Analyzing...</>
+                    : <><Lightbulb className="w-3.5 h-3.5" />{fitAnalysis ? 'View gap analysis' : 'Gap analysis'}</>
+                  }
+                </button>
+                <button
+                  onClick={reset}
+                  className="w-full py-1.5 text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
+                >
+                  Start over
+                </button>
+              </div>
+            </>
           )}
-
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto p-4">
-            <pre className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap font-mono">
-              {activeTab === 'resume' ? resume : coverLetter}
-            </pre>
-          </div>
-
-          {/* Actions */}
-          <div className="p-3 border-t border-zinc-800 flex flex-col gap-2 shrink-0">
-            <div className="flex gap-2">
-              <button
-                onClick={() => copy(activeTab === 'resume' ? resume : coverLetter, activeTab === 'resume' ? 'resume' : 'cover')}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
-              >
-                {copied === (activeTab === 'resume' ? 'resume' : 'cover')
-                  ? <><Check className="w-3.5 h-3.5 text-green-400" />Copied</>
-                  : <><Copy className="w-3.5 h-3.5" />Copy text</>
-                }
-              </button>
-              <button
-                onClick={downloadPdf}
-                disabled={downloading}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-medium transition-colors"
-              >
-                {downloading
-                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Downloading...</>
-                  : <><Download className="w-3.5 h-3.5" />Download PDF</>
-                }
-              </button>
-            </div>
-            <button
-              onClick={reset}
-              className="w-full py-1.5 text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
-            >
-              Start over
-            </button>
-          </div>
         </div>
       )}
     </div>
