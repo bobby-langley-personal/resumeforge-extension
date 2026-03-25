@@ -7,8 +7,19 @@ chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch(console.error)
 
-// One-off requests: fetch resumes, download PDF
+// One-off requests
 chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse) => {
+  if (message.type === 'FETCH_ME') {
+    fetch(`${API_BASE}/api/me`, { credentials: 'include' })
+      .then(async (res) => {
+        if (res.status === 401) return sendResponse({ error: 401 })
+        const data = await res.json()
+        sendResponse({ data })
+      })
+      .catch((err: Error) => sendResponse({ error: err.message }))
+    return true
+  }
+
   if (message.type === 'FETCH_RESUMES') {
     fetch(`${API_BASE}/api/resumes`, { credentials: 'include' })
       .then(async (res) => {

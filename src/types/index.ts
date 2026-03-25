@@ -38,8 +38,16 @@ export interface FitAnalysis {
   roleType: 'technical' | 'management' | 'sales' | 'customer_success' | 'research' | 'other'
 }
 
+export interface User {
+  id: string
+  name: string
+  email: string
+  imageUrl: string | null
+}
+
 // Background message types
 export type BgMessage =
+  | { type: 'FETCH_ME' }
   | { type: 'FETCH_RESUMES' }
   | { type: 'DOWNLOAD_PDF'; payload: { applicationId: string } }
   | { type: 'ANALYZE_FIT'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; additionalContext?: { title: string; type: string; text: string }[] } }

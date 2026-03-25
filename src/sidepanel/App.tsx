@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   FileText, Loader2, Copy, Check, Download, Eye,
-  ChevronLeft, AlertCircle, ExternalLink, Lightbulb,
+  ChevronLeft, ExternalLink, Lightbulb, LogIn,
 } from 'lucide-react'
-import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis } from '../types'
+import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis, User } from '../types'
 
 const API_BASE = 'https://resume-forge-rho.vercel.app'
 
@@ -69,8 +69,13 @@ function FitSection({ title, items, color }: { title: string; items: { point: st
 }
 
 type Step = 'scrape' | 'input' | 'generating' | 'done'
+type AuthState = 'loading' | 'unauthenticated' | 'authenticated'
 
 export default function App() {
+  // Auth
+  const [authState, setAuthState] = useState<AuthState>('loading')
+  const [user, setUser] = useState<User | null>(null)
+
   const [step, setStep] = useState<Step>('scrape')
   const [job, setJob] = useState<ScrapedJob | null>(null)
   const [scraping, setScraping] = useState(false)
@@ -78,7 +83,6 @@ export default function App() {
   // Documents from ResumeForge account
   const [docs, setDocs] = useState<ResumeItem[]>([])
   const [docsLoading, setDocsLoading] = useState(false)
-  const [needsSignIn, setNeedsSignIn] = useState(false)
   const [primaryDocId, setPrimaryDocId] = useState<string | null>(null)
   const [extraDocIds, setExtraDocIds] = useState<Set<string>>(new Set())
 
@@ -101,10 +105,24 @@ export default function App() {
 
   const portRef = useRef<chrome.runtime.Port | null>(null)
 
-  // Load documents from ResumeForge on mount
   useEffect(() => {
-    loadDocs()
+    checkAuth()
   }, [])
+
+  async function checkAuth() {
+    setAuthState('loading')
+    const response = await chrome.runtime.sendMessage({ type: 'FETCH_ME' }) as
+      | { data: User }
+      | { error: number | string }
+
+    if ('error' in response) {
+      setAuthState('unauthenticated')
+      return
+    }
+    setUser(response.data)
+    setAuthState('authenticated')
+    loadDocs()
+  }
 
   async function loadDocs() {
     setDocsLoading(true)
@@ -113,16 +131,11 @@ export default function App() {
       | { error: number | string }
 
     setDocsLoading(false)
-
-    if ('error' in response) {
-      if (response.error === 401) setNeedsSignIn(true)
-      return
-    }
+    if ('error' in response) return
 
     const items = response.data ?? []
     setDocs(items)
 
-    // Pre-select default doc as primary; all others as extra context
     const defaultDoc = items.find((d) => d.is_default)
     if (defaultDoc) {
       setPrimaryDocId(defaultDoc.id)
@@ -208,12 +221,11 @@ export default function App() {
       } else if (msg.type === 'error') {
         port.disconnect()
         if (msg.status === 401) {
-          setNeedsSignIn(true)
-          setError('Sign in to ResumeForge first, then try again.')
+          setAuthState('unauthenticated')
         } else {
           setError(`Generation failed (${msg.status ?? msg.message})`)
+          setStep('input')
         }
-        setStep('input')
       }
     })
 
@@ -293,7 +305,7 @@ export default function App() {
       }) as { data: FitAnalysis } | { error: number | string }
 
       if ('error' in response) {
-        if (response.error === 401) setNeedsSignIn(true)
+        if (response.error === 401) setAuthState('unauthenticated')
         return
       }
       setFitAnalysis(response.data)
@@ -321,6 +333,60 @@ export default function App() {
 
   return (
     <div className="w-full min-h-screen bg-zinc-950 text-zinc-100 flex flex-col text-sm">
+
+      {/* ── LOADING ── */}
+      {authState === 'loading' && (
+        <div className="flex flex-col items-center justify-center flex-1 gap-3">
+          <Loader2 className="w-5 h-5 animate-spin text-zinc-600" />
+          <p className="text-zinc-600 text-xs">Connecting…</p>
+        </div>
+      )}
+
+      {/* ── SIGN-IN SCREEN ── */}
+      {authState === 'unauthenticated' && (
+        <div className="flex flex-col items-center justify-center flex-1 gap-6 px-8 text-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-blue-600/20 flex items-center justify-center">
+              <FileText className="w-6 h-6 text-blue-400" />
+            </div>
+            <div>
+              <p className="font-semibold text-zinc-100">ResumeForge</p>
+              <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
+                Sign in to tailor your resume to any job posting in seconds.
+              </p>
+            </div>
+          </div>
+          <div className="w-full space-y-2">
+            <a
+              href={`${API_BASE}/sign-in`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded bg-blue-600 hover:bg-blue-500 font-medium text-sm transition-colors"
+            >
+              <LogIn className="w-4 h-4" />
+              Sign in
+            </a>
+            <a
+              href={`${API_BASE}/sign-up`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full flex items-center justify-center gap-2 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
+            >
+              Create an account <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+          <button
+            onClick={checkAuth}
+            className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
+          >
+            I've signed in — refresh
+          </button>
+        </div>
+      )}
+
+      {/* ── AUTHENTICATED UI ── */}
+      {authState === 'authenticated' && (<>
+
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800 shrink-0">
         {step !== 'scrape' && (
@@ -330,26 +396,31 @@ export default function App() {
         )}
         <FileText className="w-4 h-4 text-blue-400 shrink-0" />
         <span className="font-semibold">ResumeForge</span>
-        {step !== 'scrape' && job?.company && (
-          <span className="text-zinc-600 truncate ml-auto max-w-[130px] text-xs">{job.company}</span>
-        )}
-      </div>
-
-      {/* Sign-in banner */}
-      {needsSignIn && step !== 'generating' && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-950/40 border-b border-amber-900/50">
-          <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-          <span className="text-amber-300 text-xs flex-1">Sign in to ResumeForge to load your documents.</span>
-          <a
-            href={`${API_BASE}/sign-in`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-amber-400 hover:text-amber-300 shrink-0 flex items-center gap-0.5"
-          >
-            Sign in <ExternalLink className="w-3 h-3" />
-          </a>
+        <div className="ml-auto flex items-center gap-1.5 shrink-0">
+          {step !== 'scrape' && job?.company && (
+            <span className="text-zinc-600 truncate max-w-[90px] text-xs">{job.company}</span>
+          )}
+          {user && (
+            user.imageUrl ? (
+              <img
+                src={user.imageUrl}
+                alt={user.name || user.email}
+                title={user.name || user.email}
+                className="w-6 h-6 rounded-full ring-1 ring-zinc-700 object-cover shrink-0"
+              />
+            ) : (
+              <div
+                title={user.name || user.email}
+                className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center shrink-0 ring-1 ring-zinc-700"
+              >
+                <span className="text-[9px] font-bold text-white">
+                  {(user.name || user.email).charAt(0).toUpperCase()}
+                </span>
+              </div>
+            )
+          )}
         </div>
-      )}
+      </div>
 
       {/* ── STEP: SCRAPE ── */}
       {step === 'scrape' && (
@@ -359,7 +430,7 @@ export default function App() {
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
               Loading your documents...
             </div>
-          ) : !needsSignIn && primaryDoc ? (
+          ) : primaryDoc ? (
             <div className="w-full rounded border border-zinc-800 bg-zinc-900/60 p-3 text-left">
               <p className="text-xs text-zinc-500 mb-1">Loaded from ResumeForge</p>
               <p className="text-zinc-300 text-xs font-medium">{primaryDoc.title}</p>
@@ -619,6 +690,8 @@ export default function App() {
           )}
         </div>
       )}
+
+      </>)}
     </div>
   )
 }
