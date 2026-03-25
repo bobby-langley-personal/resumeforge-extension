@@ -5,7 +5,9 @@ import webExtension from 'vite-plugin-web-extension'
 export default defineConfig({
   plugins: [
     react(),
-    webExtension(),
+    webExtension({
+      additionalInputs: ['src/preview/index.html'],
+    }),
   ],
   build: {
     outDir: 'dist',
