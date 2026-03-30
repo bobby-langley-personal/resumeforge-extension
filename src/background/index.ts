@@ -48,6 +48,23 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
     return true
   }
 
+  if (message.type === 'PARSE_JOB') {
+    fetch(`${API_BASE}/api/parse-job-details`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(message.payload),
+    })
+      .then(async (res) => {
+        if (res.status === 401) return sendResponse({ error: 401 })
+        if (!res.ok) return sendResponse({ error: res.status })
+        const data = await res.json()
+        sendResponse({ data })
+      })
+      .catch((err: Error) => sendResponse({ error: err.message }))
+    return true
+  }
+
   if (message.type === 'DOWNLOAD_PDF') {
     const { applicationId } = message.payload
     fetch(`${API_BASE}/api/download-pdf/resume`, {
@@ -58,11 +75,12 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
     })
       .then(async (res) => {
         if (!res.ok) return sendResponse({ error: res.status })
+        const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+?)"/)?.[1] ?? 'Resume.pdf'
         const buffer = await res.arrayBuffer()
         const bytes = new Uint8Array(buffer)
         let binary = ''
         bytes.forEach((b) => (binary += String.fromCharCode(b)))
-        sendResponse({ data: btoa(binary) })
+        sendResponse({ data: btoa(binary), filename })
       })
       .catch((err: Error) => sendResponse({ error: err.message }))
     return true
@@ -72,6 +90,9 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
 // Streaming generation via persistent port
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'generate') return
+
+  let connected = true
+  port.onDisconnect.addListener(() => { connected = false })
 
   port.onMessage.addListener(async (message: PortInMessage) => {
     if (message.type !== 'START') return
@@ -83,6 +104,8 @@ chrome.runtime.onConnect.addListener((port) => {
         credentials: 'include',
         body: JSON.stringify(message.payload),
       })
+
+      if (!connected) return
 
       if (response.status === 401) {
         port.postMessage({ type: 'error', status: 401 })
@@ -99,13 +122,14 @@ chrome.runtime.onConnect.addListener((port) => {
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done || !connected) break
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
 
         for (const line of lines) {
+          if (!connected) break
           if (!line.startsWith('data: ')) continue
           const raw = line.slice(6).trim()
           if (!raw || raw === '[DONE]') continue
@@ -118,9 +142,9 @@ chrome.runtime.onConnect.addListener((port) => {
         }
       }
 
-      port.postMessage({ type: 'done' })
+      if (connected) port.postMessage({ type: 'done' })
     } catch (err) {
-      port.postMessage({
+      if (connected) port.postMessage({
         type: 'error',
         message: err instanceof Error ? err.message : 'Generation failed',
       })

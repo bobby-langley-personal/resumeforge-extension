@@ -51,6 +51,7 @@ export type BgMessage =
   | { type: 'FETCH_RESUMES' }
   | { type: 'DOWNLOAD_PDF'; payload: { applicationId: string } }
   | { type: 'ANALYZE_FIT'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; additionalContext?: { title: string; type: string; text: string }[] } }
+  | { type: 'PARSE_JOB'; payload: { jobDescription: string } }
 
 export type BgResponse<T = unknown> =
   | { data: T }

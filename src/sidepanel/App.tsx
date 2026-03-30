@@ -1,20 +1,68 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  FileText, Loader2, Copy, Check, Download, Eye,
+  FileText, Loader2, Download, Eye,
   ChevronLeft, ExternalLink, Lightbulb, LogIn,
 } from 'lucide-react'
 import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis, User } from '../types'
 
 const API_BASE = 'https://resume-forge-rho.vercel.app'
 
-// Runs inside the page context via executeScript — no imports allowed
+// Runs inside the page context via executeScript — must be synchronous, no imports allowed
 function scrapePageContent(): ScrapedJob {
   const url = window.location.href
-  if (url.includes('linkedin.com/jobs')) {
+  if (url.includes('linkedin.com')) {
+    const getText = (el: Element | null) => ((el as HTMLElement)?.innerText || el?.textContent || '').trim()
+
+    const pick = (...selectors: string[]) => {
+      for (const sel of selectors) {
+        const text = getText(document.querySelector(sel))
+        if (text) return text
+      }
+      return undefined
+    }
+
+    // Title/company from page title as fallback: "Job Title at Company | LinkedIn"
+    const pageTitle = document.title.replace(/\s*\|\s*LinkedIn\s*$/i, '').trim()
+    const titleMatch = pageTitle.match(/^(.+?)\s+at\s+(.+)$/i)
+    const titleFromPage = titleMatch?.[1]?.trim()
+    const companyFromPage = titleMatch?.[2]?.trim()
+
+    // Try specific selectors first, fall back to body text
+    const descSelectors = [
+      '#job-details',
+      '.jobs-description__content',
+      '.jobs-description-content__text',
+      '.jobs-box__html-content',
+      '[class*="jobs-description"]',
+      '.description__text',
+    ]
+    let description: string | undefined
+    for (const sel of descSelectors) {
+      const text = getText(document.querySelector(sel))
+      if (text.length > 100) { description = text; break }
+    }
+    if (!description) {
+      const bodyText = document.body.innerText.slice(0, 5000)
+      description = bodyText || undefined
+    }
+
     return {
-      title: document.querySelector('.job-details-jobs-unified-top-card__job-title')?.textContent?.trim(),
-      company: document.querySelector('.job-details-jobs-unified-top-card__company-name')?.textContent?.trim(),
-      description: document.querySelector('.jobs-description__content')?.textContent?.trim(),
+      title: pick(
+        '.job-details-jobs-unified-top-card__job-title h1',
+        '.job-details-jobs-unified-top-card__job-title',
+        '.jobs-unified-top-card__job-title h1',
+        '.jobs-unified-top-card__job-title',
+        'h1.t-24',
+        'h1',
+      ) ?? titleFromPage,
+      company: pick(
+        '.job-details-jobs-unified-top-card__company-name',
+        '.jobs-unified-top-card__company-name',
+        '.topcard__org-name-link',
+        '.job-details-jobs-unified-top-card__primary-description-without-tagline a',
+        '[class*="company-name"]',
+      ) ?? companyFromPage,
+      description,
       url,
     }
   }
@@ -41,7 +89,46 @@ function scrapePageContent(): ScrapedJob {
       url,
     }
   }
-  return { title: document.title, description: document.body.innerText.slice(0, 5000), url }
+  if (url.includes('indeed.com')) {
+    const pick = (...selectors: string[]) => {
+      for (const sel of selectors) {
+        const el = document.querySelector(sel)
+        const text = el?.textContent?.trim()
+        if (text) return text
+      }
+      return undefined
+    }
+    return {
+      title: pick(
+        '[data-testid="jobsearch-JobInfoHeader-title"]',
+        '.jobsearch-JobInfoHeader-title',
+        'h1',
+      )?.replace(/\s*-\s*job\s*post\s*$/i, '').trim(),
+      company: pick(
+        '[data-testid="inlineHeader-companyName"]',
+        '.jobsearch-InlineCompanyRating-companyHeader a',
+        '.jobsearch-CompanyInfoWithoutHeaderImage a',
+      ),
+      description: pick(
+        '#jobDescriptionText',
+        '.jobsearch-jobDescriptionText',
+      ),
+      url,
+    }
+  }
+  // Generic fallback — try to extract company/title from common page title patterns
+  // e.g. "Role at Company", "Role | Company", "Role - Company"
+  const titleText = document.title
+  // Strip known noisy suffixes like " - Indeed", " | LinkedIn", etc. before extracting
+  const cleanTitle = titleText.replace(/\s*[-|–]\s*(Indeed|Glassdoor|ZipRecruiter|Monster|CareerBuilder|SimplyHired|LinkedIn)\s*$/i, '').trim()
+  const companyFromTitle = cleanTitle.match(/(?:\s+(?:at|@)\s+|\s*[|\-–]\s*)([^|\-–]+)$/i)?.[1]?.trim()
+  const jobTitleFromTitle = cleanTitle.match(/^([^|\-–@]+?)(?:\s+(?:at|@)\s+|\s*[|\-–])/i)?.[1]?.trim() ?? cleanTitle
+  return {
+    title: jobTitleFromTitle,
+    company: companyFromTitle,
+    description: document.body.innerText.slice(0, 5000),
+    url,
+  }
 }
 
 // ── Fit analysis view ─────────────────────────────────────────────────────────
@@ -68,7 +155,7 @@ function FitSection({ title, items, color }: { title: string; items: { point: st
   )
 }
 
-type Step = 'scrape' | 'input' | 'generating' | 'done'
+type Step = 'scrape' | 'confirm' | 'generating' | 'done'
 type AuthState = 'loading' | 'unauthenticated' | 'authenticated'
 
 export default function App() {
@@ -79,6 +166,9 @@ export default function App() {
   const [step, setStep] = useState<Step>('scrape')
   const [job, setJob] = useState<ScrapedJob | null>(null)
   const [scraping, setScraping] = useState(false)
+  const [confirmTitle, setConfirmTitle] = useState('')
+  const [confirmCompany, setConfirmCompany] = useState('')
+  const [confirmDescription, setConfirmDescription] = useState('')
 
   // Documents from ResumeForge account
   const [docs, setDocs] = useState<ResumeItem[]>([])
@@ -86,19 +176,18 @@ export default function App() {
   const [primaryDocId, setPrimaryDocId] = useState<string | null>(null)
   const [extraDocIds, setExtraDocIds] = useState<Set<string>>(new Set())
 
+  const [parsing, setParsing] = useState(false)
+
   // Generation
   const [includeCoverLetter, setIncludeCoverLetter] = useState(false)
-  const [resume, setResume] = useState('')
   const [coverLetter, setCoverLetter] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const [applicationId, setApplicationId] = useState<string | null>(null)
 
   // Result actions
-  const [copied, setCopied] = useState<'resume' | 'cover' | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [previewing, setPreviewing] = useState(false)
-  const [activeTab, setActiveTab] = useState<'resume' | 'cover'>('resume')
   // Gap analysis
   const [fitAnalysis, setFitAnalysis] = useState<FitAnalysis | null>(null)
   const [analyzingFit, setAnalyzingFit] = useState(false)
@@ -160,7 +249,10 @@ export default function App() {
       const scraped = results[0]?.result
       if (!scraped) throw new Error('Could not read page content')
       setJob(scraped)
-      setStep('input')
+      setConfirmTitle(scraped.title ?? '')
+      setConfirmCompany(scraped.company ?? '')
+      setConfirmDescription(scraped.description ?? '')
+      setStep('confirm')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to read page')
     } finally {
@@ -168,15 +260,40 @@ export default function App() {
     }
   }
 
-  function buildPayload() {
-    if (!job) return null
+  async function enterManually() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    setJob({ url: tab?.url ?? '' })
+    setConfirmTitle('')
+    setConfirmCompany('')
+    setConfirmDescription('')
+    setError(null)
+    setStep('confirm')
+  }
+
+  async function parsePastedDescription(text: string) {
+    if (text.length < 100) return
+    setParsing(true)
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'PARSE_JOB',
+        payload: { jobDescription: text },
+      }) as { data: { company?: string; jobTitle?: string } } | { error: number | string }
+      if ('error' in response) return
+      if (response.data.jobTitle) setConfirmTitle(response.data.jobTitle)
+      if (response.data.company) setConfirmCompany(response.data.company)
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  function buildPayload(scrapedJob: ScrapedJob, overrides?: { title?: string; company?: string; description?: string }) {
     const primaryDoc = docs.find((d) => d.id === primaryDocId)
     const extraDocs = docs.filter((d) => extraDocIds.has(d.id))
 
     return {
-      company: job.company ?? '',
-      jobTitle: job.title ?? '',
-      jobDescription: job.description ?? '',
+      company: (overrides?.company ?? scrapedJob.company) || 'Company',
+      jobTitle: (overrides?.title ?? scrapedJob.title) || 'Role',
+      jobDescription: overrides?.description ?? scrapedJob.description ?? '',
       backgroundExperience: primaryDoc?.content.text ?? '',
       includeCoverLetter,
       includeSummary: false,
@@ -188,44 +305,70 @@ export default function App() {
     }
   }
 
-  async function generate() {
-    const payload = buildPayload()
-    if (!payload) return
+  async function generate(scrapedJob?: ScrapedJob) {
+    const payload = buildPayload(scrapedJob ?? job!, { title: confirmTitle, company: confirmCompany, description: confirmDescription })
+
+    // Client-side validation before hitting the API
+    if (!payload.backgroundExperience) {
+      setError('No resume content found. Add a document in ResumeForge first.')
+      return
+    }
+    if (!payload.jobDescription) {
+      setError('Could not extract job description from this page.')
+      return
+    }
 
     setStep('generating')
-    setResume('')
     setCoverLetter('')
     setError(null)
 
-    const port = chrome.runtime.connect({ name: 'generate' })
+    let port: chrome.runtime.Port
+    try {
+      port = chrome.runtime.connect({ name: 'generate' })
+    } catch {
+      setError('Lost connection to extension. Please reload the page and try again.')
+      setStep('scrape')
+      return
+    }
     portRef.current = port
+
+    let finished = false
+
+    port.onDisconnect.addListener(() => {
+      if (!finished) {
+        setError('Connection lost. Please reload and try again.')
+        setStep('scrape')
+      }
+    })
 
     port.onMessage.addListener((msg: PortOutMessage) => {
       if (msg.type === 'chunk') {
         const ev = msg.event
-        if (ev.type === 'resume_chunk' && ev.content) setResume((p) => p + ev.content)
         if (ev.type === 'cover_letter_chunk' && ev.content) setCoverLetter((p) => p + ev.content)
         if (ev.type === 'done') {
           // Final done event carries full text + applicationId
-          if (ev.resumeText) setResume(ev.resumeText)
           if (ev.coverLetterText) setCoverLetter(ev.coverLetterText)
           if (ev.applicationId) setApplicationId(ev.applicationId)
+          finished = true
           port.disconnect()
           setStep('done')
-          setActiveTab('resume')
         }
       } else if (msg.type === 'done') {
         // Stream ended without a done event — mark complete anyway
+        finished = true
         port.disconnect()
         setStep('done')
-        setActiveTab('resume')
       } else if (msg.type === 'error') {
+        finished = true
         port.disconnect()
         if (msg.status === 401) {
           setAuthState('unauthenticated')
         } else {
-          setError(`Generation failed (${msg.status ?? msg.message})`)
-          setStep('input')
+          const detail = msg.status === 400
+            ? 'Missing required fields — ensure job description and resume content are loaded.'
+            : `Generation failed (${msg.status ?? msg.message})`
+          setError(detail)
+          setStep('scrape')
         }
       }
     })
@@ -243,7 +386,7 @@ export default function App() {
       const response = await chrome.runtime.sendMessage({
         type: 'DOWNLOAD_PDF',
         payload: { applicationId },
-      }) as { data: string } | { error: number | string }
+      }) as { data: string; filename: string } | { error: number | string }
 
       if ('error' in response) {
         window.open(`${API_BASE}/dashboard`, '_blank')
@@ -257,7 +400,7 @@ export default function App() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${job?.company ?? 'resume'}_${job?.title ?? ''}.pdf`.replace(/\s+/g, '_')
+      a.download = response.filename
       a.click()
       URL.revokeObjectURL(url)
     } finally {
@@ -269,7 +412,9 @@ export default function App() {
     portRef.current?.disconnect()
     setStep('scrape')
     setJob(null)
-    setResume('')
+    setConfirmTitle('')
+    setConfirmCompany('')
+    setConfirmDescription('')
     setCoverLetter('')
     setError(null)
     setFitAnalysis(null)
@@ -298,8 +443,8 @@ export default function App() {
 
   async function analyzeGap() {
     if (fitAnalysis) { setShowFitView(true); return }
-    const payload = buildPayload()
-    if (!payload) return
+    if (!job) return
+    const payload = buildPayload(job, { title: confirmTitle, company: confirmCompany, description: confirmDescription })
     setAnalyzingFit(true)
     try {
       const response = await chrome.runtime.sendMessage({
@@ -322,20 +467,6 @@ export default function App() {
     } finally {
       setAnalyzingFit(false)
     }
-  }
-
-  async function copy(text: string, which: 'resume' | 'cover') {
-    await navigator.clipboard.writeText(text)
-    setCopied(which)
-    setTimeout(() => setCopied(null), 2000)
-  }
-
-  function toggleExtraDoc(id: string) {
-    setExtraDocIds((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
   }
 
   const primaryDoc = docs.find((d) => d.id === primaryDocId)
@@ -453,85 +584,6 @@ export default function App() {
             <p className="text-zinc-400 leading-relaxed text-xs">
               Open a job posting, then click below to pull the details and tailor your resume.
             </p>
-            <button
-              onClick={scrapeJob}
-              disabled={scraping}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-medium transition-colors"
-            >
-              {scraping ? <><Loader2 className="w-4 h-4 animate-spin" />Reading page...</> : 'Read job from this page'}
-            </button>
-          </div>
-          {error && <p className="text-red-400 text-xs">{error}</p>}
-        </div>
-      )}
-
-      {/* ── STEP: INPUT ── */}
-      {step === 'input' && job && (
-        <div className="flex flex-col flex-1 overflow-y-auto">
-          <div className="p-4 space-y-4">
-            {/* Job summary */}
-            <div className="rounded border border-zinc-800 bg-zinc-900/60 p-3">
-              <p className="font-medium text-zinc-100 leading-snug">{job.title ?? 'Unknown title'}</p>
-              {job.company && <p className="text-zinc-500 text-xs mt-0.5">{job.company}</p>}
-            </div>
-
-            {/* Document context */}
-            {docs.length > 0 ? (
-              <div className="space-y-2">
-                <p className="text-xs text-zinc-500 uppercase tracking-wider">Resume context</p>
-
-                {/* Primary doc selector */}
-                <div className="space-y-1">
-                  {docs.map((doc) => (
-                    <label
-                      key={doc.id}
-                      className={`flex items-center gap-2.5 rounded px-3 py-2 cursor-pointer border transition-colors ${
-                        primaryDocId === doc.id
-                          ? 'border-blue-600/50 bg-blue-950/30'
-                          : extraDocIds.has(doc.id)
-                          ? 'border-zinc-700/50 bg-zinc-900/40'
-                          : 'border-zinc-800/50 bg-zinc-900/20 opacity-50'
-                      }`}
-                    >
-                      {/* Primary radio */}
-                      <input
-                        type="radio"
-                        name="primary"
-                        checked={primaryDocId === doc.id}
-                        onChange={() => {
-                          setPrimaryDocId(doc.id)
-                          setExtraDocIds((prev) => {
-                            const next = new Set(prev)
-                            next.delete(doc.id)
-                            return next
-                          })
-                        }}
-                        className="accent-blue-500"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-zinc-200 truncate">{doc.title}</p>
-                        <p className="text-xs text-zinc-600">{doc.item_type}{doc.is_default ? ' · default' : ''}</p>
-                      </div>
-                      {/* Extra context toggle (only for non-primary docs) */}
-                      {primaryDocId !== doc.id && (
-                        <input
-                          type="checkbox"
-                          checked={extraDocIds.has(doc.id)}
-                          onChange={() => toggleExtraDoc(doc.id)}
-                          title="Include as additional context"
-                          className="accent-zinc-500"
-                        />
-                      )}
-                    </label>
-                  ))}
-                </div>
-                <p className="text-zinc-700 text-xs">Radio = primary · Checkbox = extra context</p>
-              </div>
-            ) : (
-              <p className="text-zinc-600 text-xs">No saved documents found. Sign in to ResumeForge to load your resume library.</p>
-            )}
-
-            {/* Options */}
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -541,15 +593,87 @@ export default function App() {
               />
               <span className="text-zinc-400 text-xs">Include cover letter</span>
             </label>
+            <button
+              onClick={scrapeJob}
+              disabled={scraping}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-medium transition-colors"
+            >
+              {scraping ? <><Loader2 className="w-4 h-4 animate-spin" />Reading page...</> : 'Read job from this page'}
+            </button>
+            <button
+              onClick={enterManually}
+              className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
+            >
+              Paste description manually instead
+            </button>
+          </div>
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+        </div>
+      )}
+
+      {/* ── STEP: CONFIRM ── */}
+      {step === 'confirm' && job && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <p className="text-zinc-400 text-xs">Confirm the details before generating.</p>
+
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1">
+                Job Title
+                {parsing && <span className="ml-1 text-zinc-600 normal-case font-normal">extracting…</span>}
+              </label>
+              <input
+                type="text"
+                value={confirmTitle}
+                onChange={(e) => setConfirmTitle(e.target.value)}
+                placeholder={parsing ? 'Extracting…' : ''}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-zinc-100 text-xs focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1">
+                Company
+                {parsing && <span className="ml-1 text-zinc-600 normal-case font-normal">extracting…</span>}
+              </label>
+              <input
+                type="text"
+                value={confirmCompany}
+                onChange={(e) => setConfirmCompany(e.target.value)}
+                placeholder={parsing ? 'Extracting…' : ''}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-zinc-100 text-xs focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1">Job Description</label>
+              <textarea
+                value={confirmDescription}
+                onChange={(e) => setConfirmDescription(e.target.value)}
+                onPaste={(e) => {
+                  const text = e.clipboardData.getData('text')
+                  if (text.length >= 100) parsePastedDescription(text)
+                }}
+                placeholder="Paste the job description here…"
+                rows={8}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-zinc-300 text-xs focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+              />
+            </div>
 
             {error && <p className="text-red-400 text-xs">{error}</p>}
+          </div>
 
+          <div className="p-3 border-t border-zinc-800 flex flex-col gap-2 shrink-0">
             <button
-              onClick={generate}
-              disabled={!primaryDocId && docs.length > 0}
-              className="w-full py-2.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40 font-medium transition-colors"
+              onClick={() => generate()}
+              disabled={!confirmDescription.trim()}
+              className="w-full py-2.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-medium text-sm transition-colors"
             >
-              Generate resume
+              Generate
+            </button>
+            <button
+              onClick={reset}
+              className="w-full py-1.5 text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
+            >
+              Back
             </button>
           </div>
         </div>
@@ -557,15 +681,17 @@ export default function App() {
 
       {/* ── STEP: GENERATING ── */}
       {step === 'generating' && (
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 text-xs text-zinc-500 shrink-0">
-            <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
-            Generating...
+        <div className="flex flex-col items-center justify-center flex-1 gap-5 px-6 text-center">
+          <div className="w-10 h-10 rounded-xl bg-blue-600/20 flex items-center justify-center">
+            <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
           </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            <pre className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap font-mono">
-              {resume || <span className="text-zinc-700">Resume will appear here...</span>}
-            </pre>
+          <div>
+            <p className="text-zinc-200 font-medium text-sm">Tailoring your resume…</p>
+            <p className="text-zinc-600 text-xs mt-1">{job?.company ? `for ${job.company}` : 'This may take a moment'}</p>
+          </div>
+          {/* Animated progress bar */}
+          <div className="w-full max-w-xs h-1 rounded-full bg-zinc-800 overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full" style={{ animation: 'progress 1.8s ease-in-out infinite' }} />
           </div>
         </div>
       )}
@@ -622,51 +748,29 @@ export default function App() {
             </>
           ) : (
             <>
-              {/* Tab bar: resume / cover letter */}
-              {coverLetter && (
-                <div className="flex border-b border-zinc-800 shrink-0">
-                  {(['resume', 'cover'] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
-                      className={`flex-1 py-2 text-xs font-medium transition-colors ${
-                        activeTab === tab
-                          ? 'text-zinc-100 border-b-2 border-blue-500'
-                          : 'text-zinc-500 hover:text-zinc-300'
-                      }`}
-                    >
-                      {tab === 'resume' ? 'Resume' : 'Cover Letter'}
-                    </button>
-                  ))}
+              {/* Success summary */}
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
+                <div className="w-10 h-10 rounded-xl bg-green-600/20 flex items-center justify-center">
+                  <FileText className="w-5 h-5 text-green-400" />
                 </div>
-              )}
-
-              {/* Content */}
-              <div className="flex-1 overflow-y-auto p-4">
-                <pre className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap font-mono">
-                  {activeTab === 'resume' ? resume : coverLetter}
-                </pre>
+                <div>
+                  <p className="text-zinc-100 font-medium text-sm">Resume ready</p>
+                  {job?.title && <p className="text-zinc-500 text-xs mt-1">{job.title}{job.company ? ` · ${job.company}` : ''}</p>}
+                  {coverLetter && <p className="text-zinc-600 text-xs mt-0.5">Cover letter included</p>}
+                </div>
               </div>
 
               {/* Actions */}
               <div className="p-3 border-t border-zinc-800 flex flex-col gap-2 shrink-0">
                 <div className="flex gap-2">
                   <button
-                    onClick={() => copy(activeTab === 'resume' ? resume : coverLetter, activeTab === 'resume' ? 'resume' : 'cover')}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
-                  >
-                    {copied === (activeTab === 'resume' ? 'resume' : 'cover')
-                      ? <><Check className="w-3.5 h-3.5 text-green-400" />Copied</>
-                      : <><Copy className="w-3.5 h-3.5" />Copy text</>
-                    }
-                  </button>
-                  <button
                     onClick={openPreview}
                     disabled={!applicationId || previewing}
-                    title={applicationId ? 'Open PDF preview' : 'Preview available after generation completes'}
-                    className="flex items-center justify-center px-2.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title={applicationId ? 'Preview PDF' : 'Preview available after generation completes'}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs transition-colors"
                   >
                     {previewing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                    {!previewing && 'Preview'}
                   </button>
                   <button
                     onClick={downloadPdf}
@@ -674,7 +778,7 @@ export default function App() {
                     className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-medium transition-colors"
                   >
                     {downloading
-                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Downloading...</>
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Downloading…</>
                       : <><Download className="w-3.5 h-3.5" />Download PDF</>
                     }
                   </button>
@@ -685,10 +789,19 @@ export default function App() {
                   className="w-full flex items-center justify-center gap-1.5 py-2 rounded border border-yellow-800/60 hover:border-yellow-700 text-yellow-400 hover:text-yellow-300 disabled:opacity-50 text-xs transition-colors"
                 >
                   {analyzingFit
-                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Analyzing...</>
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Analyzing…</>
                     : <><Lightbulb className="w-3.5 h-3.5" />{fitAnalysis ? 'View gap analysis' : 'Gap analysis'}</>
                   }
                 </button>
+                <a
+                  href={`${API_BASE}/dashboard`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Open in ResumeForge
+                </a>
                 <button
                   onClick={reset}
                   className="w-full py-1.5 text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
