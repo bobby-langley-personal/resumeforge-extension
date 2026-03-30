@@ -65,6 +65,23 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
     return true
   }
 
+  if (message.type === 'ANSWER_QUESTIONS') {
+    fetch(`${API_BASE}/api/answer-questions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(message.payload),
+    })
+      .then(async (res) => {
+        if (res.status === 401) return sendResponse({ error: 401 })
+        if (!res.ok) return sendResponse({ error: res.status })
+        const data = await res.json()
+        sendResponse({ data })
+      })
+      .catch((err: Error) => sendResponse({ error: err.message }))
+    return true
+  }
+
   if (message.type === 'DOWNLOAD_PDF') {
     const { applicationId } = message.payload
     fetch(`${API_BASE}/api/download-pdf/resume`, {

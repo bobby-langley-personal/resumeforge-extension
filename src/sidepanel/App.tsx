@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   FileText, Loader2, Download, Eye,
-  ChevronLeft, ExternalLink, Lightbulb, LogIn,
+  ChevronLeft, ExternalLink, Lightbulb, LogIn, MessageSquare, Copy, Check,
 } from 'lucide-react'
 import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis, User } from '../types'
 
@@ -192,6 +192,13 @@ export default function App() {
   const [fitAnalysis, setFitAnalysis] = useState<FitAnalysis | null>(null)
   const [analyzingFit, setAnalyzingFit] = useState(false)
   const [showFitView, setShowFitView] = useState(false)
+
+  // Follow-up questions
+  const [showQAView, setShowQAView] = useState(false)
+  const [qaInput, setQaInput] = useState('')
+  const [qaAnswers, setQaAnswers] = useState<{ question: string; answer: string }[]>([])
+  const [qaLoading, setQaLoading] = useState(false)
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
 
   const portRef = useRef<chrome.runtime.Port | null>(null)
 
@@ -419,6 +426,43 @@ export default function App() {
     setError(null)
     setFitAnalysis(null)
     setShowFitView(false)
+    setShowQAView(false)
+    setQaInput('')
+    setQaAnswers([])
+  }
+
+  async function getAnswers() {
+    const questions = qaInput.split('\n').map((q) => q.trim()).filter((q) => q.length > 0).slice(0, 5)
+    if (questions.length === 0) return
+    const payload = buildPayload(job!, { title: confirmTitle, company: confirmCompany, description: confirmDescription })
+    setQaLoading(true)
+    setQaAnswers([])
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'ANSWER_QUESTIONS',
+        payload: {
+          company: payload.company,
+          jobTitle: payload.jobTitle,
+          jobDescription: payload.jobDescription,
+          backgroundExperience: payload.backgroundExperience,
+          questions,
+        },
+      }) as { data: { answers: { question: string; answer: string }[] } } | { error: number | string }
+      if ('error' in response) {
+        if (response.error === 401) setAuthState('unauthenticated')
+        return
+      }
+      setQaAnswers(response.data.answers)
+    } finally {
+      setQaLoading(false)
+    }
+  }
+
+  function copyAnswer(text: string, idx: number) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedIdx(idx)
+      setTimeout(() => setCopiedIdx(null), 1500)
+    })
   }
 
   async function openPreview() {
@@ -600,9 +644,12 @@ export default function App() {
             >
               {scraping ? <><Loader2 className="w-4 h-4 animate-spin" />Reading page...</> : 'Read job from this page'}
             </button>
+            <p className="text-zinc-600 text-[10px] leading-snug">
+              If scraping fails, reload the job page tab first, then try again.
+            </p>
             <button
               onClick={enterManually}
-              className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
+              className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
             >
               Paste description manually instead
             </button>
@@ -671,7 +718,7 @@ export default function App() {
             </button>
             <button
               onClick={reset}
-              className="w-full py-1.5 text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
+              className="w-full py-1.5 text-zinc-400 hover:text-zinc-200 text-xs transition-colors"
             >
               Back
             </button>
@@ -700,8 +747,71 @@ export default function App() {
       {step === 'done' && (
         <div className="flex flex-col flex-1 overflow-hidden">
 
-          {/* ── Gap Analysis View ── */}
-          {showFitView ? (
+          {/* ── Follow-up Questions View ── */}
+          {showQAView ? (
+            <>
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0">
+                <button
+                  onClick={() => setShowQAView(false)}
+                  className="text-zinc-600 hover:text-zinc-400 transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-xs font-medium text-zinc-200">Follow-up Questions</span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">
+                    Application questions
+                    <span className="ml-1 font-normal normal-case text-zinc-600">· one per line, up to 5</span>
+                  </label>
+                  <textarea
+                    value={qaInput}
+                    onChange={(e) => setQaInput(e.target.value)}
+                    placeholder={"What excites you about this role?\nDescribe a challenge you overcame…"}
+                    rows={5}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-zinc-300 text-xs focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+                  />
+                  <button
+                    onClick={getAnswers}
+                    disabled={qaLoading || !qaInput.trim()}
+                    className="w-full mt-2 flex items-center justify-center gap-1.5 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-medium transition-colors"
+                  >
+                    {qaLoading
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Writing answers…</>
+                      : 'Get answers'
+                    }
+                  </button>
+                </div>
+
+                {qaAnswers.length > 0 && (
+                  <div className="space-y-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Answers</p>
+                    {qaAnswers.map((qa, i) => (
+                      <div key={i} className="rounded border border-zinc-800 bg-zinc-900/60 p-3 space-y-2">
+                        <p className="text-[10px] font-semibold text-zinc-400 leading-snug">{qa.question}</p>
+                        <p className="text-zinc-300 text-xs leading-relaxed whitespace-pre-wrap">{qa.answer}</p>
+                        <button
+                          onClick={() => copyAnswer(qa.answer, i)}
+                          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                        >
+                          {copiedIdx === i
+                            ? <><Check className="w-3 h-3 text-green-400" /><span className="text-green-400">Copied</span></>
+                            : <><Copy className="w-3 h-3" />Copy</>
+                          }
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
+
+          {/* ── Gap Analysis / Main Done View ── */}
+          {showFitView && !showQAView ? (
             <>
               <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0">
                 <button
@@ -746,7 +856,7 @@ export default function App() {
                 )}
               </div>
             </>
-          ) : (
+          ) : !showQAView ? (
             <>
               {/* Success summary */}
               <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
@@ -793,6 +903,13 @@ export default function App() {
                     : <><Lightbulb className="w-3.5 h-3.5" />{fitAnalysis ? 'View gap analysis' : 'Gap analysis'}</>
                   }
                 </button>
+                <button
+                  onClick={() => setShowQAView(true)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Follow-up questions
+                </button>
                 <a
                   href={`${API_BASE}/dashboard`}
                   target="_blank"
@@ -804,13 +921,13 @@ export default function App() {
                 </a>
                 <button
                   onClick={reset}
-                  className="w-full py-1.5 text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
+                  className="w-full py-1.5 text-zinc-400 hover:text-zinc-200 text-xs transition-colors"
                 >
                   Start over
                 </button>
               </div>
             </>
-          )}
+          ) : null}
         </div>
       )}
 
