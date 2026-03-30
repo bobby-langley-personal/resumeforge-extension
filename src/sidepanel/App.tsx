@@ -201,6 +201,7 @@ export default function App() {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
 
   const portRef = useRef<chrome.runtime.Port | null>(null)
+  const cancelledRef = useRef(false)
 
   useEffect(() => {
     checkAuth()
@@ -328,6 +329,7 @@ export default function App() {
     setStep('generating')
     setCoverLetter('')
     setError(null)
+    cancelledRef.current = false
 
     let port: chrome.runtime.Port
     try {
@@ -342,7 +344,7 @@ export default function App() {
     let finished = false
 
     port.onDisconnect.addListener(() => {
-      if (!finished) {
+      if (!finished && !cancelledRef.current) {
         setError('Connection lost. Please reload and try again.')
         setStep('scrape')
       }
@@ -429,6 +431,12 @@ export default function App() {
     setShowQAView(false)
     setQaInput('')
     setQaAnswers([])
+  }
+
+  function cancel() {
+    cancelledRef.current = true
+    portRef.current?.disconnect()
+    setStep('confirm')
   }
 
   async function getAnswers() {
@@ -740,6 +748,12 @@ export default function App() {
           <div className="w-full max-w-xs h-1 rounded-full bg-zinc-800 overflow-hidden">
             <div className="h-full bg-blue-500 rounded-full" style={{ animation: 'progress 1.8s ease-in-out infinite' }} />
           </div>
+          <button
+            onClick={cancel}
+            className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
+          >
+            Cancel
+          </button>
         </div>
       )}
 
