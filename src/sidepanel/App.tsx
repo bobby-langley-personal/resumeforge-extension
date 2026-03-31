@@ -202,6 +202,8 @@ export default function App() {
 
   const portRef = useRef<chrome.runtime.Port | null>(null)
   const cancelledRef = useRef(false)
+  const [elapsed, setElapsed] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     checkAuth()
@@ -330,6 +332,8 @@ export default function App() {
     setCoverLetter('')
     setError(null)
     cancelledRef.current = false
+    setElapsed(0)
+    timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000)
 
     let port: chrome.runtime.Port
     try {
@@ -359,16 +363,19 @@ export default function App() {
           if (ev.coverLetterText) setCoverLetter(ev.coverLetterText)
           if (ev.applicationId) setApplicationId(ev.applicationId)
           finished = true
+          clearInterval(timerRef.current!)
           port.disconnect()
           setStep('done')
         }
       } else if (msg.type === 'done') {
         // Stream ended without a done event — mark complete anyway
         finished = true
+        clearInterval(timerRef.current!)
         port.disconnect()
         setStep('done')
       } else if (msg.type === 'error') {
         finished = true
+        clearInterval(timerRef.current!)
         port.disconnect()
         if (msg.status === 401) {
           setAuthState('unauthenticated')
@@ -435,6 +442,7 @@ export default function App() {
 
   function cancel() {
     cancelledRef.current = true
+    clearInterval(timerRef.current!)
     portRef.current?.disconnect()
     setStep('confirm')
   }
@@ -748,6 +756,7 @@ export default function App() {
           <div className="w-full max-w-xs h-1 rounded-full bg-zinc-800 overflow-hidden">
             <div className="h-full bg-blue-500 rounded-full" style={{ animation: 'progress 1.8s ease-in-out infinite' }} />
           </div>
+          <p className="text-zinc-600 text-[10px] tabular-nums">{elapsed}s</p>
           <button
             onClick={cancel}
             className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
