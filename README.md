@@ -8,10 +8,18 @@ Built against the [ResumeForge](https://github.com/bobby-langley-personal/Resume
 
 ## What it does
 
-- Reads job title, company, and description from any job posting page
-- Supports LinkedIn Jobs, Greenhouse, Lever, and Workday with site-specific selectors — generic fallback for everything else
-- Opens a side panel (Chrome Side Panel API) so you stay on the job page while reviewing
-- Hands scraped data to the ResumeForge web app with one click
+- Reads job title, company, and description from any job posting page (LinkedIn, Greenhouse, Lever, Workday, Indeed — generic fallback for everything else)
+- Falls back to manual paste when scraping fails; auto-extracts company and title from pasted text via AI
+- Opens a side panel (Chrome Side Panel API) so you stay on the job page while working
+- Generates a tailored resume (and optional cover letter) via the ResumeForge backend with one click
+- **Cover letter toggle** — opt-in before generating; download PDF when done
+- **Summary section toggle** — opt-in before generating
+- **Gap analysis** — Haiku fit analysis showing strengths, gaps, and what was improved
+- **Follow-up questions** — enter up to 5 application questions post-generation and get AI-written answers with copy buttons
+- **Cancel** — stop generation mid-stream and return to the confirm step
+- **Elapsed timer** — shows seconds ticking during generation for reference
+- Preview and download resume PDF directly from the side panel
+- Saved to AI Resumes dashboard automatically after generation
 
 ---
 
@@ -83,10 +91,13 @@ resumeforge-extension/
 ├── public/
 │   └── icon*.png               Placeholder icons (replace before publishing)
 └── src/
-    ├── background/index.ts     Service worker — opens side panel on icon click
-    ├── content/index.ts        Content script — listens for SCRAPE_JOB messages
+    ├── background/index.ts     Service worker — one-off message handlers (FETCH_ME, FETCH_RESUMES,
+    │                           ANALYZE_FIT, PARSE_JOB, ANSWER_QUESTIONS, DOWNLOAD_PDF) +
+    │                           persistent port handler for streaming resume generation
+    ├── content/index.ts        Content script (minimal — scraping runs via executeScript)
     ├── sidepanel/
-    │   ├── App.tsx             Main side panel UI
+    │   ├── App.tsx             Main side panel UI — scrape → confirm → generating → done flow;
+    │   │                       gap analysis sub-view, follow-up questions sub-view, cancel + elapsed timer
     │   ├── index.tsx           React entry point
     │   ├── index.html
     │   └── styles.css
@@ -95,19 +106,21 @@ resumeforge-extension/
     │   ├── index.tsx
     │   ├── index.html
     │   └── styles.css
-    ├── lib/
-    │   ├── api.ts              ResumeForge backend API client
-    │   ├── auth.ts             Chrome storage auth token helpers
-    │   └── scraper.ts          DOM scraping with site-specific selectors
+    ├── preview/
+    │   ├── App.tsx             PDF preview tab — reads base64 PDF from chrome.storage.local
+    │   ├── index.tsx
+    │   ├── index.html
+    │   └── styles.css
     └── types/
-        └── index.ts            Shared TypeScript types
+        └── index.ts            Shared TypeScript types (BgMessage, PortInMessage, PortOutMessage,
+                                GenerateRequest, ScrapedJob, ResumeItem, FitAnalysis, User)
 ```
 
 ---
 
 ## Environment
 
-The API base URL is set in `src/lib/api.ts`:
+The API base URL is hardcoded at the top of `src/background/index.ts` and `src/sidepanel/App.tsx`:
 
 ```typescript
 const API_BASE = 'https://resume-forge-rho.vercel.app'
