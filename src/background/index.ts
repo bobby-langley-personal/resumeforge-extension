@@ -83,8 +83,8 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
   }
 
   if (message.type === 'DOWNLOAD_PDF') {
-    const { applicationId } = message.payload
-    fetch(`${API_BASE}/api/download-pdf/resume`, {
+    const { applicationId, docType = 'resume' } = message.payload
+    fetch(`${API_BASE}/api/download-pdf/${docType}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

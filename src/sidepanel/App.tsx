@@ -180,6 +180,7 @@ export default function App() {
 
   // Generation
   const [includeCoverLetter, setIncludeCoverLetter] = useState(false)
+  const [includeSummary, setIncludeSummary] = useState(false)
   const [coverLetter, setCoverLetter] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -187,6 +188,7 @@ export default function App() {
 
   // Result actions
   const [downloading, setDownloading] = useState(false)
+  const [downloadingCoverLetter, setDownloadingCoverLetter] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   // Gap analysis
   const [fitAnalysis, setFitAnalysis] = useState<FitAnalysis | null>(null)
@@ -306,7 +308,7 @@ export default function App() {
       jobDescription: overrides?.description ?? scrapedJob.description ?? '',
       backgroundExperience: primaryDoc?.content.text ?? '',
       includeCoverLetter,
-      includeSummary: false,
+      includeSummary,
       additionalContext: extraDocs.map((d) => ({
         title: d.title,
         type: d.item_type,
@@ -436,6 +438,7 @@ export default function App() {
     setFitAnalysis(null)
     setShowFitView(false)
     setShowQAView(false)
+    setDownloadingCoverLetter(false)
     setQaInput('')
     setQaAnswers([])
   }
@@ -479,6 +482,35 @@ export default function App() {
       setCopiedIdx(idx)
       setTimeout(() => setCopiedIdx(null), 1500)
     })
+  }
+
+  async function downloadCoverLetterPdf() {
+    if (!applicationId) return
+    setDownloadingCoverLetter(true)
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'DOWNLOAD_PDF',
+        payload: { applicationId, docType: 'cover-letter' },
+      }) as { data: string; filename: string } | { error: number | string }
+
+      if ('error' in response) {
+        window.open(`${API_BASE}/dashboard`, '_blank')
+        return
+      }
+
+      const blob = new Blob(
+        [Uint8Array.from(atob(response.data), (c) => c.charCodeAt(0))],
+        { type: 'application/pdf' }
+      )
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = response.filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setDownloadingCoverLetter(false)
+    }
   }
 
   async function openPreview() {
@@ -652,6 +684,15 @@ export default function App() {
                 className="accent-blue-500"
               />
               <span className="text-zinc-400 text-xs">Include cover letter</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeSummary}
+                onChange={(e) => setIncludeSummary(e.target.checked)}
+                className="accent-blue-500"
+              />
+              <span className="text-zinc-400 text-xs">Include summary section</span>
             </label>
             <button
               onClick={scrapeJob}
@@ -916,6 +957,18 @@ export default function App() {
                     }
                   </button>
                 </div>
+                {coverLetter && (
+                  <button
+                    onClick={downloadCoverLetterPdf}
+                    disabled={!applicationId || downloadingCoverLetter}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs transition-colors"
+                  >
+                    {downloadingCoverLetter
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Downloading…</>
+                      : <><Download className="w-3.5 h-3.5" />Download Cover Letter</>
+                    }
+                  </button>
+                )}
                 <button
                   onClick={analyzeGap}
                   disabled={analyzingFit}

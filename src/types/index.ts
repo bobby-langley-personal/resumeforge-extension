@@ -49,7 +49,7 @@ export interface User {
 export type BgMessage =
   | { type: 'FETCH_ME' }
   | { type: 'FETCH_RESUMES' }
-  | { type: 'DOWNLOAD_PDF'; payload: { applicationId: string } }
+  | { type: 'DOWNLOAD_PDF'; payload: { applicationId: string; docType?: 'resume' | 'cover-letter' } }
   | { type: 'ANALYZE_FIT'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; additionalContext?: { title: string; type: string; text: string }[] } }
   | { type: 'PARSE_JOB'; payload: { jobDescription: string } }
   | { type: 'ANSWER_QUESTIONS'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; questions: string[] } }
