@@ -1,8 +1,8 @@
-# ResumeForge Chrome Extension
+# Easy Apply Chrome Extension
 
-A Chrome extension that lets you tailor your resume to any job posting without leaving your browser. Open a job listing, click the ResumeForge icon, and the extension reads the page and hands the job details directly to the ResumeForge web app.
+A Chrome extension that lets you tailor your resume to any job posting without leaving your browser. Open a job listing, click the Easy Apply icon, and the extension reads the page and hands the job details directly to the Easy Apply web app.
 
-Built against the [ResumeForge](https://github.com/bobby-langley-personal/ResumeForge) Vercel backend.
+Built against the [Easy Apply](https://github.com/bobby-langley-personal/ResumeForge) Vercel backend.
 
 ---
 
@@ -11,7 +11,7 @@ Built against the [ResumeForge](https://github.com/bobby-langley-personal/Resume
 - Reads job title, company, and description from any job posting page (LinkedIn, Greenhouse, Lever, Workday, Indeed — generic fallback for everything else)
 - Falls back to manual paste when scraping fails; auto-extracts company and title from pasted text via AI
 - Opens a side panel (Chrome Side Panel API) so you stay on the job page while working
-- Generates a tailored resume (and optional cover letter) via the ResumeForge backend with one click
+- Generates a tailored resume (and optional cover letter) via the Easy Apply backend with one click
 - **Cover letter toggle** — opt-in before generating; download PDF when done
 - **Summary section toggle** — opt-in before generating
 - **Gap analysis** — Haiku fit analysis showing strengths, gaps, and what was improved
@@ -59,7 +59,7 @@ npm run dev
 3. Click **Load unpacked**
 4. Select the `dist/` folder in this repo
 
-The extension will appear in your toolbar. After any code change, go back to `chrome://extensions` and click the reload icon next to ResumeForge.
+The extension will appear in your toolbar. After any code change, go back to `chrome://extensions` and click the reload icon next to Easy Apply.
 
 ---
 
@@ -126,7 +126,7 @@ The API base URL is hardcoded at the top of `src/background/index.ts` and `src/s
 const API_BASE = 'https://resume-forge-rho.vercel.app'
 ```
 
-Change this to `http://localhost:3000` for local ResumeForge development.
+Change this to `http://localhost:3000` for local Easy Apply development.
 
 ---
 
@@ -143,7 +143,7 @@ Right-click inside the side panel → **Inspect**. This shows:
 ### Service worker DevTools (API layer)
 This is where the actual fetch calls to `resume-forge-rho.vercel.app` happen:
 1. Go to `chrome://extensions`
-2. Find ResumeForge → click **"Service Worker"** (the blue inspect link)
+2. Find Easy Apply → click **"Service Worker"** (the blue inspect link)
 3. Open the **Network** tab
 
 All API calls (`/api/resumes`, `/api/generate-documents`, `/api/download-pdf`) will appear here with their real status codes. This is the right place to debug auth failures (401), CORS issues, or API errors.
@@ -151,17 +151,17 @@ All API calls (`/api/resumes`, `/api/generate-documents`, `/api/download-pdf`) w
 ### Auth / 401 errors
 The extension uses `credentials: 'include'` on all fetch calls from the service worker, which picks up the Clerk session cookie automatically. If you see 401:
 1. Open `https://resume-forge-rho.vercel.app` in Chrome and sign in
-2. Go back to `chrome://extensions` → click the **reload icon** on ResumeForge
+2. Go back to `chrome://extensions` → click the **reload icon** on Easy Apply
 3. Reopen the side panel
 
 ### After any code change
 ```
 npm run build
 ```
-Then go to `chrome://extensions` → click the **reload icon** on ResumeForge. The side panel will pick up the new build automatically on next open.
+Then go to `chrome://extensions` → click the **reload icon** on Easy Apply. The side panel will pick up the new build automatically on next open.
 
 ---
 
 ## Related
 
-- [ResumeForge web app](https://github.com/bobby-langley-personal/ResumeForge)
+- [Easy Apply web app](https://github.com/bobby-langley-personal/ResumeForge)

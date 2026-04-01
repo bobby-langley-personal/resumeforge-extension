@@ -5,8 +5,8 @@ export default function PreviewApp() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    chrome.storage.local.get('resumeforge_pdf_preview', (result) => {
-      const b64 = result.resumeforge_pdf_preview as string | undefined
+    chrome.storage.local.get('easy_apply_pdf_preview', (result) => {
+      const b64 = result.easy_apply_pdf_preview as string | undefined
       if (!b64) { setLoading(false); return }
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
       const blob = new Blob([bytes], { type: 'application/pdf' })

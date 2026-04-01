@@ -170,7 +170,7 @@ export default function App() {
   const [confirmCompany, setConfirmCompany] = useState('')
   const [confirmDescription, setConfirmDescription] = useState('')
 
-  // Documents from ResumeForge account
+  // Documents from Easy Apply account
   const [docs, setDocs] = useState<ResumeItem[]>([])
   const [docsLoading, setDocsLoading] = useState(false)
   const [primaryDocId, setPrimaryDocId] = useState<string | null>(null)
@@ -322,7 +322,7 @@ export default function App() {
 
     // Client-side validation before hitting the API
     if (!payload.backgroundExperience) {
-      setError('No resume content found. Add a document in ResumeForge first.')
+      setError('No resume content found. Add a document in Easy Apply first.')
       return
     }
     if (!payload.jobDescription) {
@@ -526,7 +526,7 @@ export default function App() {
         window.open(`${API_BASE}/dashboard`, '_blank')
         return
       }
-      await chrome.storage.local.set({ resumeforge_pdf_preview: response.data })
+      await chrome.storage.local.set({ easy_apply_pdf_preview: response.data })
       chrome.tabs.create({ url: chrome.runtime.getURL('src/preview/index.html') })
     } finally {
       setPreviewing(false)
@@ -582,7 +582,7 @@ export default function App() {
               <FileText className="w-6 h-6 text-blue-400" />
             </div>
             <div>
-              <p className="font-semibold text-zinc-100">ResumeForge</p>
+              <p className="font-semibold text-zinc-100">Easy Apply</p>
               <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
                 Sign in to tailor your resume to any job posting in seconds.
               </p>
@@ -627,7 +627,7 @@ export default function App() {
           </button>
         )}
         <FileText className="w-4 h-4 text-blue-400 shrink-0" />
-        <span className="font-semibold">ResumeForge</span>
+        <span className="font-semibold">Easy Apply</span>
         <div className="ml-auto flex items-center gap-1.5 shrink-0">
           {step !== 'scrape' && job?.company && (
             <span className="text-zinc-600 truncate max-w-[90px] text-xs">{job.company}</span>
@@ -664,7 +664,7 @@ export default function App() {
             </div>
           ) : primaryDoc ? (
             <div className="w-full rounded border border-zinc-800 bg-zinc-900/60 p-3 text-left">
-              <p className="text-xs text-zinc-500 mb-1">Loaded from ResumeForge</p>
+              <p className="text-xs text-zinc-500 mb-1">Loaded from Easy Apply</p>
               <p className="text-zinc-300 text-xs font-medium">{primaryDoc.title}</p>
               {docs.length > 1 && (
                 <p className="text-zinc-600 text-xs mt-0.5">+{docs.length - 1} additional doc{docs.length > 2 ? 's' : ''}</p>
@@ -993,7 +993,7 @@ export default function App() {
                   className="w-full flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  Open in ResumeForge
+                  Open in Easy Apply
                 </a>
                 <button
                   onClick={reset}
