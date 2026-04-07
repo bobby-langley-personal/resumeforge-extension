@@ -1,7 +1,7 @@
 import { getAuthToken } from './auth'
 import type { GenerateRequest } from '../types'
 
-const API_BASE = 'https://resume-forge-rho.vercel.app'
+const API_BASE = 'https://easy-apply.ai'
 
 export async function generateDocuments(payload: GenerateRequest): Promise<Response> {
   const token = await getAuthToken()

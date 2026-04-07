@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis, User } from '../types'
 
-const API_BASE = 'https://resume-forge-rho.vercel.app'
+const API_BASE = 'https://easy-apply.ai'
 
 // Runs inside the page context via executeScript — must be synchronous, no imports allowed
 function scrapePageContent(): ScrapedJob {

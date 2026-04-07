@@ -1,6 +1,6 @@
 import type { BgMessage, PortInMessage } from '../types'
 
-const API_BASE = 'https://resume-forge-rho.vercel.app'
+const API_BASE = 'https://easy-apply.ai'
 
 // Open side panel on icon click
 chrome.sidePanel
