@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   FileText, Loader2, Download, Eye,
-  ChevronLeft, ExternalLink, Lightbulb, LogIn, MessageSquare, Copy, Check,
+  ChevronLeft, ExternalLink, Lightbulb, LogIn, MessageSquare, Copy, Check, RefreshCw,
 } from 'lucide-react'
 import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis, User } from '../types'
 
@@ -609,9 +609,10 @@ export default function App() {
           </div>
           <button
             onClick={checkAuth}
-            className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-2 rounded border border-zinc-500 hover:border-zinc-300 text-zinc-200 hover:text-white text-xs font-medium transition-colors"
           >
-            I've signed in — refresh
+            <RefreshCw className="w-3 h-3" />
+            I&apos;ve signed in — refresh
           </button>
         </div>
       )}
