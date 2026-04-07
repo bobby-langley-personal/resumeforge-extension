@@ -12,7 +12,7 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
   if (message.type === 'FETCH_ME') {
     fetch(`${API_BASE}/api/me`, { credentials: 'include' })
       .then(async (res) => {
-        if (res.status === 401) return sendResponse({ error: 401 })
+        if (!res.ok) return sendResponse({ error: res.status })
         const data = await res.json()
         sendResponse({ data })
       })
