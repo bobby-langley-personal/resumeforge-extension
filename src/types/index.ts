@@ -45,10 +45,17 @@ export interface User {
   imageUrl: string | null
 }
 
+export interface BillingStatus {
+  subscription_status: 'free' | 'pro' | 'canceled'
+  subscription_period_end: string | null
+  tailored_resume_count: number
+}
+
 // Background message types
 export type BgMessage =
   | { type: 'FETCH_ME' }
   | { type: 'FETCH_RESUMES' }
+  | { type: 'FETCH_BILLING_STATUS' }
   | { type: 'DOWNLOAD_PDF'; payload: { applicationId: string; docType?: 'resume' | 'cover-letter' } }
   | { type: 'ANALYZE_FIT'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; additionalContext?: { title: string; type: string; text: string }[] } }
   | { type: 'PARSE_JOB'; payload: { jobDescription: string } }

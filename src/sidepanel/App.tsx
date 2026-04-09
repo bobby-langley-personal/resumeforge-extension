@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   FileText, Loader2, Download, Eye,
-  ChevronLeft, ExternalLink, Lightbulb, LogIn, MessageSquare, Copy, Check, RefreshCw,
+  ChevronLeft, ExternalLink, Lightbulb, LogIn, MessageSquare, Copy, Check, RefreshCw, Crown,
 } from 'lucide-react'
-import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis, User } from '../types'
+import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis, User, BillingStatus } from '../types'
 
 const API_BASE = 'https://easy-apply.ai'
 
@@ -163,6 +163,10 @@ export default function App() {
   const [authState, setAuthState] = useState<AuthState>('loading')
   const [user, setUser] = useState<User | null>(null)
 
+  // Billing
+  const [billing, setBilling] = useState<BillingStatus | null>(null)
+  const [showPaywall, setShowPaywall] = useState(false)
+
   const [step, setStep] = useState<Step>('scrape')
   const [job, setJob] = useState<ScrapedJob | null>(null)
   const [scraping, setScraping] = useState(false)
@@ -224,6 +228,15 @@ export default function App() {
     setUser(response.data)
     setAuthState('authenticated')
     loadDocs()
+    loadBilling()
+  }
+
+  async function loadBilling() {
+    const response = await chrome.runtime.sendMessage({ type: 'FETCH_BILLING_STATUS' }) as
+      | { data: BillingStatus }
+      | { error: number | string }
+    if ('error' in response) return
+    setBilling(response.data)
   }
 
   async function loadDocs() {
@@ -368,6 +381,7 @@ export default function App() {
           clearInterval(timerRef.current!)
           port.disconnect()
           setStep('done')
+          loadBilling()
         }
       } else if (msg.type === 'done') {
         // Stream ended without a done event — mark complete anyway
@@ -375,12 +389,16 @@ export default function App() {
         clearInterval(timerRef.current!)
         port.disconnect()
         setStep('done')
+        loadBilling()
       } else if (msg.type === 'error') {
         finished = true
         clearInterval(timerRef.current!)
         port.disconnect()
         if (msg.status === 401) {
           setAuthState('unauthenticated')
+        } else if (msg.status === 402) {
+          setShowPaywall(true)
+          setStep('scrape')
         } else {
           const detail = msg.status === 400
             ? 'Missing required fields — ensure job description and resume content are loaded.'
@@ -438,6 +456,7 @@ export default function App() {
     setFitAnalysis(null)
     setShowFitView(false)
     setShowQAView(false)
+    setShowPaywall(false)
     setDownloadingCoverLetter(false)
     setQaInput('')
     setQaAnswers([])
@@ -655,8 +674,40 @@ export default function App() {
         </div>
       </div>
 
+      {/* ── PAYWALL SCREEN ── */}
+      {step === 'scrape' && showPaywall && (
+        <div className="flex flex-col items-center justify-center flex-1 gap-5 px-6 text-center">
+          <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
+            <Crown className="w-6 h-6 text-amber-400" />
+          </div>
+          <div>
+            <p className="text-zinc-100 font-semibold text-sm">You've used your 3 free resumes</p>
+            <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
+              Upgrade to Pro for unlimited tailored resumes, cover letters, and more.
+            </p>
+          </div>
+          <div className="w-full space-y-2">
+            <a
+              href={`${API_BASE}/pricing`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium text-sm transition-colors"
+            >
+              <Crown className="w-4 h-4" />
+              Upgrade to Pro
+            </a>
+            <button
+              onClick={() => setShowPaywall(false)}
+              className="w-full py-2 text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
+            >
+              Maybe later
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── STEP: SCRAPE ── */}
-      {step === 'scrape' && (
+      {step === 'scrape' && !showPaywall && (
         <div className="flex flex-col items-center justify-center flex-1 gap-5 px-6 text-center">
           {docsLoading ? (
             <div className="flex items-center gap-2 text-zinc-600 text-xs">
@@ -672,6 +723,21 @@ export default function App() {
               )}
             </div>
           ) : null}
+
+          {billing && billing.subscription_status !== 'pro' && (
+            <div className="w-full flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/60 px-3 py-2">
+              <span className="text-zinc-500 text-xs">{billing.tailored_resume_count}/3 free resumes used</span>
+              <a
+                href={`${API_BASE}/pricing`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-amber-400 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
+              >
+                <Crown className="w-3 h-3" />
+                Upgrade
+              </a>
+            </div>
+          )}
 
           <div className="space-y-3 w-full">
             <p className="text-zinc-400 leading-relaxed text-xs">

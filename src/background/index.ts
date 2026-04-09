@@ -20,6 +20,17 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
     return true
   }
 
+  if (message.type === 'FETCH_BILLING_STATUS') {
+    fetch(`${API_BASE}/api/billing/status`, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) return sendResponse({ error: res.status })
+        const data = await res.json()
+        sendResponse({ data })
+      })
+      .catch((err: Error) => sendResponse({ error: err.message }))
+    return true
+  }
+
   if (message.type === 'FETCH_RESUMES') {
     fetch(`${API_BASE}/api/resumes`, { credentials: 'include' })
       .then(async (res) => {
