@@ -868,7 +868,24 @@ export default function App() {
               </div>
             )}
 
-            {error && <p className="text-red-400 text-xs">{error}</p>}
+            {error && (
+              error.startsWith('No resume content') ? (
+                <p className="text-red-400 text-xs">
+                  No resume content found.{' '}
+                  <a
+                    href={`${API_BASE}/resumes`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-red-300 transition-colors"
+                  >
+                    Add your experience in Easy Apply
+                  </a>
+                  {' '}first.
+                </p>
+              ) : (
+                <p className="text-red-400 text-xs">{error}</p>
+              )
+            )}
           </div>
 
           <div className="p-3 border-t border-zinc-800 flex flex-col gap-2 shrink-0">
