@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Easy Apply",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Tailor your resume to any job posting in seconds",
   "permissions": [
     "activeTab",
+    "cookies",
     "scripting",
     "storage",
     "sidePanel"
@@ -20,7 +21,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["src/content/index.ts"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "side_panel": {
