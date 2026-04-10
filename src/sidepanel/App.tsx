@@ -181,6 +181,7 @@ export default function App() {
   const [extraDocIds, setExtraDocIds] = useState<Set<string>>(new Set())
 
   const [parsing, setParsing] = useState(false)
+  const [detectedQuestions, setDetectedQuestions] = useState<string[]>([])
 
   // Generation
   const [includeCoverLetter, setIncludeCoverLetter] = useState(false)
@@ -277,7 +278,19 @@ export default function App() {
       setConfirmTitle(scraped.title ?? '')
       setConfirmCompany(scraped.company ?? '')
       setConfirmDescription(scraped.description ?? '')
+      setDetectedQuestions([])
       setStep('confirm')
+      // Extract questions in the background — don't block the confirm step
+      if (scraped.description) {
+        setParsing(true)
+        chrome.runtime.sendMessage({
+          type: 'PARSE_JOB',
+          payload: { jobDescription: scraped.description },
+        }).then((response: { data?: { company?: string; jobTitle?: string; questions?: string[] } } | { error: number | string }) => {
+          if ('error' in response) return
+          if (response.data?.questions?.length) setDetectedQuestions(response.data.questions)
+        }).catch(() => {}).finally(() => setParsing(false))
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to read page')
     } finally {
@@ -298,14 +311,16 @@ export default function App() {
   async function parsePastedDescription(text: string) {
     if (text.length < 100) return
     setParsing(true)
+    setDetectedQuestions([])
     try {
       const response = await chrome.runtime.sendMessage({
         type: 'PARSE_JOB',
         payload: { jobDescription: text },
-      }) as { data: { company?: string; jobTitle?: string } } | { error: number | string }
+      }) as { data: { company?: string; jobTitle?: string; questions?: string[] } } | { error: number | string }
       if ('error' in response) return
       if (response.data.jobTitle) setConfirmTitle(response.data.jobTitle)
       if (response.data.company) setConfirmCompany(response.data.company)
+      if (response.data.questions?.length) setDetectedQuestions(response.data.questions)
     } finally {
       setParsing(false)
     }
@@ -327,6 +342,7 @@ export default function App() {
         type: d.item_type,
         text: d.content.text,
       })),
+      ...(detectedQuestions.length > 0 && { questions: detectedQuestions }),
     }
   }
 
@@ -458,6 +474,7 @@ export default function App() {
     setShowQAView(false)
     setShowPaywall(false)
     setDownloadingCoverLetter(false)
+    setDetectedQuestions([])
     setQaInput('')
     setQaAnswers([])
   }
@@ -829,6 +846,28 @@ export default function App() {
               />
             </div>
 
+            {parsing && (
+              <p className="text-zinc-600 text-[10px] flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Scanning for application questions…
+              </p>
+            )}
+            {!parsing && detectedQuestions.length > 0 && (
+              <div className="rounded border border-zinc-700 bg-zinc-900/60 p-2.5 space-y-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  {detectedQuestions.length} application question{detectedQuestions.length > 1 ? 's' : ''} detected
+                </p>
+                <ul className="space-y-1">
+                  {detectedQuestions.map((q, i) => (
+                    <li key={i} className="text-zinc-400 text-[11px] leading-snug">
+                      <span className="text-blue-500 mr-1">›</span>{q}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-zinc-600 text-[10px]">Answers will be generated with your resume.</p>
+              </div>
+            )}
+
             {error && <p className="text-red-400 text-xs">{error}</p>}
           </div>
 
@@ -1047,7 +1086,12 @@ export default function App() {
                   }
                 </button>
                 <button
-                  onClick={() => setShowQAView(true)}
+                  onClick={() => {
+                    if (detectedQuestions.length > 0 && !qaInput.trim()) {
+                      setQaInput(detectedQuestions.join('\n'))
+                    }
+                    setShowQAView(true)
+                  }}
                   className="w-full flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
