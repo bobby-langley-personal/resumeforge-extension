@@ -1075,6 +1075,12 @@ export default function App() {
       )}
 
       </>)}
+
+      <div className="px-3 pb-2 pt-1 text-center">
+        <span className="text-[10px] text-zinc-600">
+          v{chrome.runtime.getManifest().version}
+        </span>
+      </div>
     </div>
   )
 }
