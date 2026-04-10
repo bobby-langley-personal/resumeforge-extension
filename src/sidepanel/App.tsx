@@ -670,23 +670,27 @@ export default function App() {
             <span className="text-zinc-600 truncate max-w-[90px] text-xs">{job.company}</span>
           )}
           {user && (
-            user.imageUrl ? (
-              <img
-                src={user.imageUrl}
-                alt={user.name || user.email}
-                title={user.name || user.email}
-                className="w-6 h-6 rounded-full ring-1 ring-zinc-700 object-cover shrink-0"
-              />
-            ) : (
-              <div
-                title={user.name || user.email}
-                className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center shrink-0 ring-1 ring-zinc-700"
-              >
-                <span className="text-[9px] font-bold text-white">
-                  {(user.name || user.email).charAt(0).toUpperCase()}
-                </span>
-              </div>
-            )
+            <a
+              href={`${API_BASE}/resumes`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`${user.name || user.email} · Open account`}
+              className="hover:ring-2 hover:ring-blue-500 rounded-full transition-all shrink-0"
+            >
+              {user.imageUrl ? (
+                <img
+                  src={user.imageUrl}
+                  alt={user.name || user.email}
+                  className="w-6 h-6 rounded-full ring-1 ring-zinc-700 object-cover"
+                />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center ring-1 ring-zinc-700">
+                  <span className="text-[9px] font-bold text-white">
+                    {(user.name || user.email).charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              )}
+            </a>
           )}
         </div>
       </div>
