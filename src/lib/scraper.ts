@@ -13,14 +13,22 @@ export function scrapeCurrentPage(): ScrapedJob {
     }
   }
 
-  // Greenhouse
+  // Greenhouse (handles both boards.greenhouse.io and job-boards.greenhouse.io)
   if (url.includes('greenhouse.io')) {
-    return {
-      title: document.querySelector('h1.app-title')?.textContent?.trim(),
-      company: document.querySelector('.company-name')?.textContent?.trim(),
-      description: document.querySelector('#content')?.textContent?.trim(),
-      url,
-    }
+    const title =
+      document.querySelector('h1.app-title')?.textContent?.trim() ||
+      document.querySelector('h1')?.textContent?.trim()
+    const company =
+      document.querySelector('.company-name')?.textContent?.trim() ||
+      document.querySelector('[class*="company"]')?.textContent?.trim() ||
+      document.querySelector('meta[property="og:site_name"]')?.getAttribute('content') ||
+      undefined
+    const description =
+      document.querySelector('#content')?.textContent?.trim() ||
+      document.querySelector('[class*="job-description"]')?.textContent?.trim() ||
+      document.querySelector('[class*="description"]')?.textContent?.trim() ||
+      document.querySelector('main')?.textContent?.trim()
+    return { title, company, description, url }
   }
 
   // Lever

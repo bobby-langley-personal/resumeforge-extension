@@ -9,7 +9,7 @@ Chrome extension companion for [Easy Apply AI](https://easy-apply.ai).
 | Field | Value |
 |-------|-------|
 | Extension name | Easy Apply |
-| Current version | `0.3.0` (in `manifest.json`) |
+| Current version | `0.3.1` (in `manifest.json`) |
 | Manifest version | MV3 |
 | Build tool | Vite + `vite-plugin-web-extension` |
 | Framework | React 18, TypeScript, Tailwind CSS v3 |
@@ -75,11 +75,31 @@ The Easy Apply webapp footer reads this attribute to display `ext vX.X.X`. **Alw
 
 ## API Integration
 
-All API calls go through the background service worker using `credentials: 'include'` (session cookies from `easy-apply.ai`).
+All API calls go through the background service worker.
 
-- Auth is Clerk session-based (cookies set when user is signed into easy-apply.ai in the same browser)
+**Auth (v0.3.1+):** `chrome.cookies.get` reads the `__session` Clerk JWT and passes it as `Authorization: Bearer <token>`. Falls back to `credentials: 'include'` if the cookie is unavailable. This bypasses Clerk's CSRF origin check which rejected extension requests in older versions.
+
 - 401 responses → show "sign in" prompt in sidepanel
 - 402 responses → paywall (free tier limit reached)
+- 403/404 on a known route → treated as likely session expiry; `silentAuthCheck()` re-probes auth and transitions to sign-in screen if session is gone
+
+## Backwards Compatibility with the Webapp
+
+The Chrome Web Store approval process takes days. Always assume users are running an older approved extension version against the live webapp.
+
+**As an extension developer:** only call endpoints that are documented in the webapp's `CLAUDE.md`. Never rely on undocumented response fields. Handle gracefully if a new field is missing (old webapp serving new extension) or if a field disappears (unlikely but defensive).
+
+**Webapp must never:** remove or rename the extension's API endpoints, remove response fields the extension reads, or change HTTP status code semantics (401/402/400) without a coordinated extension + webapp release.
+
+**Version history:**
+
+| Version | Key change | Store status |
+|---------|-----------|-------------|
+| v0.2.0 | Initial paywall-free release | Likely approved |
+| v0.3.0 | Stripe paywall enforcement | Submitted / pending |
+| v0.3.1 | **Fix auth**: Bearer token from cookies; session-expiry error handling | **Submit immediately** |
+
+v0.3.1 fixes a critical auth regression affecting all users on v0.3.0 and earlier — the `credentials: 'include'` mechanism was being rejected by Clerk's CSRF check. Prioritize getting this approved.
 
 ---
 

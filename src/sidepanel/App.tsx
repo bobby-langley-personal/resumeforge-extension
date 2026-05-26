@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   FileText, Loader2, Download, Eye,
-  ChevronLeft, ExternalLink, Lightbulb, LogIn, MessageSquare, Copy, Check, RefreshCw, Crown,
+  ChevronLeft, ExternalLink, Lightbulb, LogIn, MessageSquare, Copy, Check, RefreshCw, Crown, Bug, X,
 } from 'lucide-react'
 import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis, User, BillingStatus } from '../types'
 
@@ -67,12 +67,26 @@ function scrapePageContent(): ScrapedJob {
     }
   }
   if (url.includes('greenhouse.io')) {
-    return {
-      title: document.querySelector('h1.app-title')?.textContent?.trim(),
-      company: document.querySelector('.company-name')?.textContent?.trim(),
-      description: document.querySelector('#content')?.textContent?.trim(),
-      url,
-    }
+    const title =
+      document.querySelector('h1.app-title')?.textContent?.trim() ||
+      document.querySelector('h1')?.textContent?.trim()
+    // Try CSS selectors first, then parse "Job Title at Company" from page title,
+    // then fall back to logo alt text (e.g. "Glean Logo" → "Glean")
+    const companyFromClass =
+      document.querySelector('.company-name')?.textContent?.trim() ||
+      document.querySelector('[class*="company"]')?.textContent?.trim() ||
+      document.querySelector('meta[property="og:site_name"]')?.getAttribute('content')
+    const companyFromPageTitle = document.title.match(/\bat\s+(.+?)(?:\s*[-|]|$)/i)?.[1]?.trim()
+    const logoAlt = document.querySelector('img[alt]')?.getAttribute('alt') ?? ''
+    const companyFromLogo = logoAlt.replace(/\s*logo\s*$/i, '').trim() || undefined
+    const company = companyFromClass || companyFromPageTitle || companyFromLogo
+    const description =
+      document.querySelector('#content')?.textContent?.trim() ||
+      document.querySelector('[class*="job-description"]')?.textContent?.trim() ||
+      document.querySelector('[class*="description"]')?.textContent?.trim() ||
+      document.querySelector('main')?.textContent?.trim()
+    console.log('[EasyApply] Greenhouse scrape:', { title, company, descLen: description?.length, url })
+    return { title, company, description, url }
   }
   if (url.includes('jobs.lever.co')) {
     return {
@@ -188,6 +202,7 @@ export default function App() {
   const [includeSummary, setIncludeSummary] = useState(false)
   const [coverLetter, setCoverLetter] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [sessionError, setSessionError] = useState(false)
 
   const [applicationId, setApplicationId] = useState<string | null>(null)
 
@@ -207,6 +222,15 @@ export default function App() {
   const [qaLoading, setQaLoading] = useState(false)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
 
+  const [showFeedback, setShowFeedback] = useState(false)
+  const [feedbackType, setFeedbackType] = useState<'general' | 'bug'>('bug')
+  const [feedbackMessage, setFeedbackMessage] = useState('')
+  const [feedbackAnonymous, setFeedbackAnonymous] = useState(false)
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
+  const [feedbackIssueUrl, setFeedbackIssueUrl] = useState<string | null>(null)
+  const [feedbackSent, setFeedbackSent] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
   const portRef = useRef<chrome.runtime.Port | null>(null)
   const cancelledRef = useRef(false)
   const [elapsed, setElapsed] = useState(0)
@@ -216,13 +240,18 @@ export default function App() {
     checkAuth()
   }, [])
 
-  async function checkAuth() {
+  async function checkAuth(retry = true) {
     setAuthState('loading')
     const response = await chrome.runtime.sendMessage({ type: 'FETCH_ME' }) as
       | { data: User }
       | { error: number | string }
 
     if ('error' in response) {
+      // Auto-retry once after 2s — service worker may not have warmed up yet
+      if (retry) {
+        await new Promise(r => setTimeout(r, 2000))
+        return checkAuth(false)
+      }
       setAuthState('unauthenticated')
       return
     }
@@ -230,6 +259,22 @@ export default function App() {
     setAuthState('authenticated')
     loadDocs()
     loadBilling()
+  }
+
+  async function manualRefresh() {
+    setRefreshing(true)
+    await checkAuth()
+    setRefreshing(false)
+  }
+
+  // Silently probe auth after a suspicious error — if session expired, transitions to sign-in screen
+  async function silentAuthCheck() {
+    const response = await chrome.runtime.sendMessage({ type: 'FETCH_ME' }) as
+      | { data: User }
+      | { error: number | string }
+    if ('error' in response) {
+      setAuthState('unauthenticated')
+    }
   }
 
   async function loadBilling() {
@@ -267,13 +312,48 @@ export default function App() {
     setError(null)
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      console.log('[EasyApply] scrapeJob — active tab:', tab?.id, tab?.url)
       if (!tab.id) throw new Error('No active tab found')
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: scrapePageContent,
       })
       const scraped = results[0]?.result
+      console.log('[EasyApply] scrapeJob — scraped result:', {
+        title: scraped?.title,
+        company: scraped?.company,
+        descLen: scraped?.description?.length,
+        url: scraped?.url,
+      })
       if (!scraped) throw new Error('Could not read page content')
+
+      // If we got nothing useful on a known job board, try reloading the tab once
+      const knownBoards = ['linkedin.com', 'indeed.com', 'greenhouse.io', 'lever.co', 'workday.com', 'glassdoor.com', 'ziprecruiter.com']
+      const isKnownBoard = knownBoards.some(d => (scraped.url ?? '').includes(d))
+      const isEmpty = !scraped.title && !scraped.description
+      if (isEmpty && isKnownBoard && tab.id) {
+        setError('Page not fully loaded — reloading tab and retrying…')
+        await chrome.tabs.reload(tab.id)
+        // Wait for the tab to finish loading
+        await new Promise<void>(resolve => {
+          const listener = (tabId: number, info: chrome.tabs.TabChangeInfo) => {
+            if (tabId === tab.id && info.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener)
+              resolve()
+            }
+          }
+          chrome.tabs.onUpdated.addListener(listener)
+          setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve() }, 8000)
+        })
+        setError(null)
+        const retryResults = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: scrapePageContent })
+        const retryScrape = retryResults[0]?.result
+        if (!retryScrape || (!retryScrape.title && !retryScrape.description)) {
+          throw new Error('Could not read page content after reload. Try clicking "Paste description manually" instead.')
+        }
+        Object.assign(scraped, retryScrape)
+      }
+
       setJob(scraped)
       setConfirmTitle(scraped.title ?? '')
       setConfirmCompany(scraped.company ?? '')
@@ -417,11 +497,17 @@ export default function App() {
           setShowPaywall(true)
           setStep('scrape')
         } else {
+          const likelyAuthIssue = !msg.status || msg.status === 403 || msg.status === 404
           const detail = msg.status === 400
             ? 'Missing required fields — ensure job description and resume content are loaded.'
-            : `Generation failed (${msg.status ?? msg.message})`
+            : likelyAuthIssue
+              ? 'Generation failed — your session may have expired.'
+              : `Generation failed (${msg.status ?? msg.message})`
           setError(detail)
+          setSessionError(likelyAuthIssue)
           setStep('scrape')
+          // If session-related, silently probe — will auto-redirect to sign-in if logged out
+          if (likelyAuthIssue) silentAuthCheck()
         }
       }
     })
@@ -471,6 +557,7 @@ export default function App() {
     setCoverLetter('')
     setApplicationId(null)
     setError(null)
+    setSessionError(false)
     setFitAnalysis(null)
     setShowFitView(false)
     setShowQAView(false)
@@ -614,7 +701,7 @@ export default function App() {
 
       {/* ── SIGN-IN SCREEN ── */}
       {authState === 'unauthenticated' && (
-        <div className="flex flex-col items-center justify-center flex-1 gap-6 px-8 text-center">
+        <div className="flex flex-col items-center justify-center flex-1 gap-5 px-8 text-center">
           <div className="flex flex-col items-center gap-3">
             <div className="w-12 h-12 rounded-xl bg-blue-600/20 flex items-center justify-center">
               <FileText className="w-6 h-6 text-blue-400" />
@@ -626,18 +713,35 @@ export default function App() {
               </p>
             </div>
           </div>
+
+          {/* Step-by-step instructions */}
+          <div className="w-full rounded border border-zinc-800 bg-zinc-900/50 p-3 text-left space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">How to connect</p>
+            {[
+              'Sign in at easy-apply.ai (button below)',
+              'Keep that tab open in your browser',
+              'If you were already signed in, refresh that tab first',
+              'Come back here and hit "I\'ve signed in — Refresh"',
+            ].map((step, i) => (
+              <p key={i} className="text-zinc-400 text-[11px] leading-snug flex gap-2">
+                <span className="text-zinc-600 shrink-0">{i + 1}.</span>
+                {step}
+              </p>
+            ))}
+          </div>
+
           <div className="w-full space-y-2">
             <a
-              href={`${API_BASE}/sign-in`}
+              href={`https://www.easy-apply.ai/sign-in`}
               target="_blank"
               rel="noopener noreferrer"
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded bg-blue-600 hover:bg-blue-500 font-medium text-sm transition-colors"
             >
               <LogIn className="w-4 h-4" />
-              Sign in
+              Sign in to Easy Apply
             </a>
             <a
-              href={`${API_BASE}/sign-up`}
+              href={`https://www.easy-apply.ai/sign-up`}
               target="_blank"
               rel="noopener noreferrer"
               className="w-full flex items-center justify-center gap-2 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
@@ -646,11 +750,11 @@ export default function App() {
             </a>
           </div>
           <button
-            onClick={checkAuth}
+            onClick={() => checkAuth()}
             className="w-full flex items-center justify-center gap-2 py-2 rounded border border-zinc-500 hover:border-zinc-300 text-zinc-200 hover:text-white text-xs font-medium transition-colors"
           >
             <RefreshCw className="w-3 h-3" />
-            I&apos;ve signed in — refresh
+            I&apos;ve signed in — Refresh
           </button>
         </div>
       )}
@@ -660,9 +764,18 @@ export default function App() {
 
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800 shrink-0">
-        {step !== 'scrape' && (
+        {step !== 'scrape' ? (
           <button onClick={reset} className="text-zinc-600 hover:text-zinc-400 mr-1 transition-colors">
             <ChevronLeft className="w-4 h-4" />
+          </button>
+        ) : (
+          <button
+            onClick={manualRefresh}
+            disabled={refreshing}
+            title="Refresh connection"
+            className="text-zinc-600 hover:text-zinc-400 mr-1 transition-colors disabled:opacity-40"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
         )}
         <FileText className="w-4 h-4 text-blue-400 shrink-0" />
@@ -801,7 +914,32 @@ export default function App() {
               Paste description manually instead
             </button>
           </div>
-          {error && <p className="text-red-400 text-xs">{error}</p>}
+          {error && (
+            <div className="w-full rounded border border-red-900/50 bg-red-950/30 px-3 py-2.5 space-y-2 text-left">
+              <p className="text-red-400 text-xs leading-snug">{error}</p>
+              {sessionError && (
+                <div className="flex items-center gap-2 pt-0.5">
+                  <a
+                    href={`${API_BASE}/sign-in`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors font-medium"
+                  >
+                    <LogIn className="w-3 h-3" />
+                    Sign in to Easy Apply
+                  </a>
+                  <span className="text-zinc-700 text-[10px]">·</span>
+                  <button
+                    onClick={() => { setError(null); setSessionError(false); checkAuth(); }}
+                    className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    I&apos;m signed in — retry
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1143,10 +1281,96 @@ export default function App() {
 
       </>)}
 
-      <div className="px-3 pb-2 pt-1 text-center">
+      {/* Version + feedback row */}
+      <div className="px-3 pb-2 pt-1 flex items-center justify-between shrink-0">
         <span className="text-[10px] text-zinc-600">
           v{chrome.runtime.getManifest().version}
         </span>
+        <div className="relative">
+          <button
+            onClick={() => { setShowFeedback(v => !v); setFeedbackSent(false); setFeedbackIssueUrl(null) }}
+            title="Report a bug or give feedback"
+            className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            <Bug className="w-3 h-3" />
+            <span>Feedback</span>
+          </button>
+          {showFeedback && (
+            <div className="absolute bottom-6 right-0 w-64 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl p-3 z-50">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[11px] font-semibold text-zinc-200">Send feedback</p>
+                <button onClick={() => setShowFeedback(false)} className="text-zinc-600 hover:text-zinc-400 transition-colors">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {feedbackSent ? (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] text-green-400">Thanks! We got your message.</p>
+                  {feedbackIssueUrl && (
+                    <a
+                      href={feedbackIssueUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                      View GitHub issue
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="flex gap-1 mb-2">
+                    {(['bug', 'general'] as const).map(t => (
+                      <button
+                        key={t}
+                        onClick={() => setFeedbackType(t)}
+                        className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${feedbackType === t ? 'border-blue-500 bg-blue-500/20 text-blue-300' : 'border-zinc-700 text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                        {t === 'bug' ? 'Bug report' : 'General'}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    value={feedbackMessage}
+                    onChange={e => setFeedbackMessage(e.target.value)}
+                    placeholder={feedbackType === 'bug' ? 'What went wrong? Steps to reproduce…' : "What's on your mind?"}
+                    rows={3}
+                    className="w-full text-[11px] bg-zinc-800 border border-zinc-700 rounded p-1.5 text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none focus:border-zinc-500"
+                  />
+                  <label className="flex items-center gap-1.5 mt-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={feedbackAnonymous}
+                      onChange={e => setFeedbackAnonymous(e.target.checked)}
+                      className="w-3 h-3 accent-blue-500"
+                    />
+                    <span className="text-[10px] text-zinc-500">Send anonymously (don&apos;t include my email)</span>
+                  </label>
+                  <button
+                    onClick={() => {
+                      if (!feedbackMessage.trim()) return
+                      setFeedbackSubmitting(true)
+                      chrome.runtime.sendMessage(
+                        { type: 'SUBMIT_FEEDBACK', payload: { type: feedbackType, message: feedbackMessage.trim(), anonymous: feedbackAnonymous, source: 'extension' } },
+                        (res: { data?: { issueUrl?: string | null } } | undefined) => {
+                          setFeedbackSubmitting(false)
+                          setFeedbackSent(true)
+                          setFeedbackIssueUrl(res?.data?.issueUrl ?? null)
+                          setFeedbackMessage('')
+                        }
+                      )
+                    }}
+                    disabled={feedbackSubmitting || !feedbackMessage.trim()}
+                    className="mt-2 w-full text-[11px] bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-white rounded py-1 transition-colors"
+                  >
+                    {feedbackSubmitting ? 'Sending…' : 'Send'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
