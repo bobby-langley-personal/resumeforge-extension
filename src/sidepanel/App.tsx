@@ -361,6 +361,7 @@ export default function App() {
 
     setStep('generating')
     setCoverLetter('')
+    setApplicationId(null)
     setError(null)
     cancelledRef.current = false
     setElapsed(0)
@@ -468,6 +469,7 @@ export default function App() {
     setConfirmCompany('')
     setConfirmDescription('')
     setCoverLetter('')
+    setApplicationId(null)
     setError(null)
     setFitAnalysis(null)
     setShowFitView(false)
