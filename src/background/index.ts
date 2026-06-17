@@ -97,8 +97,10 @@ async function getClerkToken(): Promise<string | null> {
 
 async function getBgHeaders(extra: Record<string, string> = {}): Promise<HeadersInit> {
   const token = await getClerkToken()
-  if (token) return { 'Content-Type': 'application/json', ...extra, Authorization: `Bearer ${token}` }
-  return { 'Content-Type': 'application/json', ...extra }
+  const extVer = chrome.runtime.getManifest().version
+  const base = { 'Content-Type': 'application/json', 'X-Extension-Version': extVer, ...extra }
+  if (token) return { ...base, Authorization: `Bearer ${token}` }
+  return base
 }
 
 // ── One-off requests ────────────────────────────────────────────────────────

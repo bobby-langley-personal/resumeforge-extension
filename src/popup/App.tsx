@@ -8,7 +8,7 @@ export default function App() {
         <span className="font-semibold text-sm">Easy Apply</span>
       </div>
       <p className="text-zinc-400 text-xs leading-relaxed">
-        Click the extension icon to open the side panel and tailor your resume to any job posting.
+        Click the extension icon to open the side panel and tailor your résumé to any job posting.
       </p>
     </div>
   )
