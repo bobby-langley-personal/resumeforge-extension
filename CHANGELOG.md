@@ -8,6 +8,21 @@ Paste the **"What's new"** block for each version into the Store listing's "What
 
 ---
 
+## [0.3.4] — 2026-06-16
+
+> **What's new in this version (Chrome Web Store)**
+> - Corrected spelling of "résumé" throughout the extension (proper accent marks)
+> - Extension version is now forwarded to Easy Apply's API logs, making it easier to diagnose issues tied to specific builds
+
+### Changed
+- All user-facing instances of "resume" updated to "résumé" with correct accent marks — sign-in screen, paywall, generating screen, success screen, and free-tier counter
+- Manifest description updated to use "résumé"
+
+### Added
+- `X-Extension-Version` header sent on every API call so the webapp can log which extension version was active when a request was made — visible in the admin logs panel
+
+---
+
 ## [0.3.3] — 2026-04-15
 
 > **What's new in this version (Chrome Web Store)**
