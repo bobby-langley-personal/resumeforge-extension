@@ -230,6 +230,19 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
     return true
   }
 
+  if (message.type === 'SCRAPE_REPORT') {
+    // Fire-and-forget telemetry — no response needed
+    getBgHeaders().then(headers =>
+      fetch(`${API_BASE}/api/log-event`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ event: 'scrape_quality', ...message.payload }),
+      }).catch(() => {})
+    )
+    return false
+  }
+
   if (message.type === 'SUBMIT_FEEDBACK') {
     getBgHeaders().then(headers =>
       fetch(`${API_BASE}/api/feedback`, {

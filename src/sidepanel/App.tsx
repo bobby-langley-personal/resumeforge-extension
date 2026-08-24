@@ -8,28 +8,71 @@ import type { ScrapedJob, ResumeItem, PortOutMessage, FitAnalysis, User, Billing
 const API_BASE = 'https://easy-apply.ai'
 
 // Runs inside the page context via executeScript — must be synchronous, no imports allowed
-function scrapePageContent(): ScrapedJob {
+function scrapePageContent(): ScrapedJob & { method?: string } {
   const url = window.location.href
+
+  // ── Step 0: JSON-LD structured data (stable across all platforms, unaffected by CSS changes) ──
+  try {
+    const ldScripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+    for (const script of ldScripts) {
+      try {
+        const raw = JSON.parse(script.textContent || '')
+        const entries: any[] = Array.isArray(raw) ? raw : [raw]
+        const job = entries.find((d: any) => d['@type'] === 'JobPosting')
+        if (job?.title && job?.description) {
+          const stripHtml = (s: string) => s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+          return {
+            title: job.title?.trim(),
+            company: job.hiringOrganization?.name?.trim(),
+            description: stripHtml(job.description),
+            url,
+            method: 'json-ld',
+          }
+        }
+      } catch { /* malformed JSON-LD, skip */ }
+    }
+  } catch { /* querySelectorAll failed */ }
+
   if (url.includes('linkedin.com')) {
     const getText = (el: Element | null) => ((el as HTMLElement)?.innerText || el?.textContent || '').trim()
 
-    const pick = (...selectors: string[]) => {
+    // Find the right-panel / detail view so we don't pick up the search results list
+    const detailPanel: Element =
+      document.querySelector('.jobs-search__job-details--wrapper') ||
+      document.querySelector('.jobs-search__job-details') ||
+      document.querySelector('.scaffold-layout__detail') ||
+      document.querySelector('[data-test-id="job-details"]') ||
+      document.querySelector('main') ||
+      document.body
+
+    const pick = (root: Element, ...selectors: string[]) => {
       for (const sel of selectors) {
-        const text = getText(document.querySelector(sel))
+        const text = getText(root.querySelector(sel))
         if (text) return text
       }
       return undefined
     }
 
-    // Title/company from page title as fallback: "Job Title at Company | LinkedIn"
-    const pageTitle = document.title.replace(/\s*\|\s*LinkedIn\s*$/i, '').trim()
-    const titleMatch = pageTitle.match(/^(.+?)\s+at\s+(.+)$/i)
-    const titleFromPage = titleMatch?.[1]?.trim()
-    const companyFromPage = titleMatch?.[2]?.trim()
+    // Title/company from page title — strip "(N)" notification count prefix and "| LinkedIn" suffix
+    const rawPageTitle = document.title
+      .replace(/\s*\|\s*LinkedIn\s*$/i, '')
+      .replace(/^\(\d+\)\s*/, '')
+      .trim()
+    // Also try og:title which is often cleaner (no notification count)
+    const ogTitle = (document.querySelector('meta[property="og:title"]') as HTMLMetaElement)?.content
+      ?.replace(/\s*[|\-–]\s*LinkedIn\s*$/i, '')
+      .trim()
+    const pageTitle = ogTitle || rawPageTitle
+    // LinkedIn page title format: "Job Title | Company | LinkedIn" (pipe-separated, not "at")
+    // After stripping "| LinkedIn" above, pageTitle is "Job Title | Company"
+    const pageParts = pageTitle.split(/\s*\|\s*/)
+    const titleFromPage = pageParts[0]?.trim() || undefined
+    const companyFromPage = pageParts[1]?.trim() || undefined
 
-    // Try specific selectors first, fall back to body text
+    // Try specific description selectors scoped to the detail panel first
     const descSelectors = [
       '#job-details',
+      'article.jobs-description',
       '.jobs-description__content',
       '.jobs-description-content__text',
       '.jobs-box__html-content',
@@ -37,33 +80,70 @@ function scrapePageContent(): ScrapedJob {
       '.description__text',
     ]
     let description: string | undefined
+    let method = 'li-selector'
     for (const sel of descSelectors) {
-      const text = getText(document.querySelector(sel))
+      const text = getText(detailPanel.querySelector(sel))
       if (text.length > 100) { description = text; break }
     }
+
+    // If still nothing, seek to "About the job" in the detail panel text
     if (!description) {
-      const bodyText = document.body.innerText.slice(0, 5000)
-      description = bodyText || undefined
+      method = 'li-text-anchor-panel'
+      const panelText = getText(detailPanel)
+      const aboutIdx = panelText.search(/About\s+the\s+job/i)
+      if (aboutIdx >= 0) {
+        description = panelText.slice(aboutIdx, aboutIdx + 8000)
+      }
     }
 
+    // Last resort: find "About the job" anywhere in body text
+    if (!description) {
+      const bodyText = document.body.innerText
+      const aboutIdx = bodyText.search(/About\s+the\s+job/i)
+      if (aboutIdx >= 0) {
+        method = 'li-text-anchor-body'
+        description = bodyText.slice(aboutIdx, aboutIdx + 8000)
+      } else {
+        method = 'li-body-fallback'
+        description = bodyText.slice(0, 5000) || undefined
+      }
+    }
+
+    const resolvedTitle = pick(
+      detailPanel,
+      '.job-details-jobs-unified-top-card__job-title h1',
+      '.job-details-jobs-unified-top-card__job-title h2',
+      '.job-details-jobs-unified-top-card__job-title',
+      '.jobs-unified-top-card__job-title h1',
+      '.jobs-unified-top-card__job-title h2',
+      '.jobs-unified-top-card__job-title',
+      '[data-test-id="job-title"]',
+      'h1.t-24',
+      'article h1',
+      'h1',
+      'a[href*="/jobs/view/"]',
+    ) ?? titleFromPage
+
+    // Extract company from description "Company - X" line if selectors and page title both failed
+    // Strip legal suffixes and subsidiary labels (e.g. "Amazon.com Services LLC" → "Amazon")
+    const companyFromDesc = description?.match(/^Company\s*[-–]\s*(.+)$/m)?.[1]
+      ?.replace(/\s*(\.com\s+Services?|LLC|Inc\.?|Ltd\.?|Corp\.?|Co\.?)\s*$/gi, '').trim()
+
+    const resolvedCompany = pick(
+      detailPanel,
+      '.job-details-jobs-unified-top-card__company-name',
+      '.jobs-unified-top-card__company-name',
+      '.topcard__org-name-link',
+      '.job-details-jobs-unified-top-card__primary-description-without-tagline a',
+      '[class*="company-name"]',
+    ) ?? companyFromPage ?? companyFromDesc
+
     return {
-      title: pick(
-        '.job-details-jobs-unified-top-card__job-title h1',
-        '.job-details-jobs-unified-top-card__job-title',
-        '.jobs-unified-top-card__job-title h1',
-        '.jobs-unified-top-card__job-title',
-        'h1.t-24',
-        'h1',
-      ) ?? titleFromPage,
-      company: pick(
-        '.job-details-jobs-unified-top-card__company-name',
-        '.jobs-unified-top-card__company-name',
-        '.topcard__org-name-link',
-        '.job-details-jobs-unified-top-card__primary-description-without-tagline a',
-        '[class*="company-name"]',
-      ) ?? companyFromPage,
+      title: resolvedTitle,
+      company: resolvedCompany,
       description,
       url,
+      method,
     }
   }
   if (url.includes('greenhouse.io')) {
@@ -145,6 +225,27 @@ function scrapePageContent(): ScrapedJob {
   }
 }
 
+// ── Countdown label ───────────────────────────────────────────────────────────
+function CountdownLabel({ endsAt }: { endsAt: string }) {
+  const [label, setLabel] = useState('')
+
+  useEffect(() => {
+    function compute() {
+      const diff = new Date(endsAt).getTime() - Date.now()
+      if (diff <= 0) { setLabel(''); return }
+      const h = Math.floor(diff / 3600000)
+      const m = Math.floor((diff % 3600000) / 60000)
+      setLabel(h > 0 ? `${h}h ${m}m` : `${m}m`)
+    }
+    compute()
+    const id = setInterval(compute, 60000)
+    return () => clearInterval(id)
+  }, [endsAt])
+
+  if (!label) return null
+  return <span>· resets in {label}</span>
+}
+
 // ── Fit analysis view ─────────────────────────────────────────────────────────
 const FIT_COLOR: Record<string, string> = {
   'Strong Fit': 'text-green-400 border-green-700 bg-green-950/40',
@@ -203,6 +304,7 @@ export default function App() {
   const [coverLetter, setCoverLetter] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [sessionError, setSessionError] = useState(false)
+  const [scrapeError, setScrapeError] = useState(false)
 
   const [applicationId, setApplicationId] = useState<string | null>(null)
 
@@ -230,11 +332,15 @@ export default function App() {
   const [feedbackIssueUrl, setFeedbackIssueUrl] = useState<string | null>(null)
   const [feedbackSent, setFeedbackSent] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [showReloadConfirm, setShowReloadConfirm] = useState(false)
 
   const portRef = useRef<chrome.runtime.Port | null>(null)
   const cancelledRef = useRef(false)
   const [elapsed, setElapsed] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Track whether the user manually edited title/company — prevents paste-parse from overwriting
+  const titleManuallyEdited = useRef(false)
+  const companyManuallyEdited = useRef(false)
 
   useEffect(() => {
     checkAuth()
@@ -310,6 +416,7 @@ export default function App() {
   async function scrapeJob() {
     setScraping(true)
     setError(null)
+    setScrapeError(false)
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       console.log('[EasyApply] scrapeJob — active tab:', tab?.id, tab?.url)
@@ -354,6 +461,30 @@ export default function App() {
         Object.assign(scraped, retryScrape)
       }
 
+      // Fire scrape quality telemetry (fire-and-forget)
+      const scrapedUrl = scraped.url ?? ''
+      const platform = scrapedUrl.includes('linkedin.com') ? 'linkedin'
+        : scrapedUrl.includes('greenhouse.io') ? 'greenhouse'
+        : scrapedUrl.includes('lever.co') ? 'lever'
+        : scrapedUrl.includes('indeed.com') ? 'indeed'
+        : scrapedUrl.includes('workday') ? 'workday'
+        : scrapedUrl.includes('glassdoor.com') ? 'glassdoor'
+        : scrapedUrl.includes('ziprecruiter.com') ? 'ziprecruiter'
+        : 'other'
+      chrome.runtime.sendMessage({
+        type: 'SCRAPE_REPORT',
+        payload: {
+          platform,
+          hasTitle: !!scraped.title,
+          hasCompany: !!scraped.company,
+          hasDescription: !!scraped.description,
+          descriptionLength: scraped.description?.length ?? 0,
+          method: (scraped as any).method ?? 'selector',
+        },
+      }).catch(() => {})
+
+      titleManuallyEdited.current = false
+      companyManuallyEdited.current = false
       setJob(scraped)
       setConfirmTitle(scraped.title ?? '')
       setConfirmCompany(scraped.company ?? '')
@@ -373,13 +504,40 @@ export default function App() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to read page')
+      setScrapeError(true)
     } finally {
       setScraping(false)
     }
   }
 
+  async function reloadAndRetry() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.id) { scrapeJob(); return }
+      setError('Reloading tab…')
+      setScrapeError(false)
+      await chrome.tabs.reload(tab.id)
+      await new Promise<void>(resolve => {
+        const listener = (tabId: number, info: chrome.tabs.TabChangeInfo) => {
+          if (tabId === tab.id && info.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener)
+            resolve()
+          }
+        }
+        chrome.tabs.onUpdated.addListener(listener)
+        setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve() }, 8000)
+      })
+      setError(null)
+    } catch {
+      setError(null)
+    }
+    scrapeJob()
+  }
+
   async function enterManually() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    titleManuallyEdited.current = false
+    companyManuallyEdited.current = false
     setJob({ url: tab?.url ?? '' })
     setConfirmTitle('')
     setConfirmCompany('')
@@ -398,8 +556,8 @@ export default function App() {
         payload: { jobDescription: text },
       }) as { data: { company?: string; jobTitle?: string; questions?: string[] } } | { error: number | string }
       if ('error' in response) return
-      if (response.data.jobTitle) setConfirmTitle(response.data.jobTitle)
-      if (response.data.company) setConfirmCompany(response.data.company)
+      if (response.data.jobTitle && !titleManuallyEdited.current) setConfirmTitle(response.data.jobTitle)
+      if (response.data.company && !companyManuallyEdited.current) setConfirmCompany(response.data.company)
       if (response.data.questions?.length) setDetectedQuestions(response.data.questions)
     } finally {
       setParsing(false)
@@ -549,6 +707,8 @@ export default function App() {
 
   function reset() {
     portRef.current?.disconnect()
+    titleManuallyEdited.current = false
+    companyManuallyEdited.current = false
     setStep('scrape')
     setJob(null)
     setConfirmTitle('')
@@ -817,7 +977,7 @@ export default function App() {
             <Crown className="w-6 h-6 text-amber-400" />
           </div>
           <div>
-            <p className="text-zinc-100 font-semibold text-sm">You've used your 3 free résumés</p>
+            <p className="text-zinc-100 font-semibold text-sm">You've used your free résumés this week</p>
             <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
               Upgrade to Pro for unlimited tailored résumés, cover letters, and more.
             </p>
@@ -862,7 +1022,12 @@ export default function App() {
 
           {billing && billing.subscription_status !== 'pro' && (
             <div className="w-full flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/60 px-3 py-2">
-              <span className="text-zinc-500 text-xs">{billing.tailored_resume_count}/3 free résumés used</span>
+              <span className="text-zinc-500 text-xs">
+                {billing.weekly_resume_count}/5 free this week{' '}
+                {billing.weekly_window_ends_at && (
+                  <CountdownLabel endsAt={billing.weekly_window_ends_at} />
+                )}
+              </span>
               <a
                 href={`${API_BASE}/pricing`}
                 target="_blank"
@@ -904,9 +1069,6 @@ export default function App() {
             >
               {scraping ? <><Loader2 className="w-4 h-4 animate-spin" />Reading page...</> : 'Read job from this page'}
             </button>
-            <p className="text-zinc-600 text-[10px] leading-snug">
-              If scraping fails, reload the job page tab first, then try again.
-            </p>
             <button
               onClick={enterManually}
               className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
@@ -917,6 +1079,16 @@ export default function App() {
           {error && (
             <div className="w-full rounded border border-red-900/50 bg-red-950/30 px-3 py-2.5 space-y-2 text-left">
               <p className="text-red-400 text-xs leading-snug">{error}</p>
+              {scrapeError && !sessionError && (
+                <button
+                  onClick={() => setShowReloadConfirm(true)}
+                  disabled={scraping}
+                  className="flex items-center gap-1.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors font-medium disabled:opacity-50"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Reload tab &amp; retry
+                </button>
+              )}
               {sessionError && (
                 <div className="flex items-center gap-2 pt-0.5">
                   <a
@@ -957,7 +1129,7 @@ export default function App() {
               <input
                 type="text"
                 value={confirmTitle}
-                onChange={(e) => setConfirmTitle(e.target.value)}
+                onChange={(e) => { titleManuallyEdited.current = true; setConfirmTitle(e.target.value) }}
                 placeholder={parsing ? 'Extracting…' : ''}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-zinc-100 text-xs focus:outline-none focus:border-blue-500"
               />
@@ -970,7 +1142,7 @@ export default function App() {
               <input
                 type="text"
                 value={confirmCompany}
-                onChange={(e) => setConfirmCompany(e.target.value)}
+                onChange={(e) => { companyManuallyEdited.current = true; setConfirmCompany(e.target.value) }}
                 placeholder={parsing ? 'Extracting…' : ''}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-zinc-100 text-xs focus:outline-none focus:border-blue-500"
               />
@@ -1138,6 +1310,22 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              <div className="border-t border-zinc-800 p-3 flex gap-2 shrink-0">
+                <button
+                  onClick={() => setShowQAView(false)}
+                  className="flex-1 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  Back
+                </button>
+                <button
+                  onClick={() => { setQaAnswers([]); setQaInput(''); }}
+                  className="flex-1 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
+                >
+                  New questions
+                </button>
+              </div>
             </>
           ) : null}
 
@@ -1280,6 +1468,33 @@ export default function App() {
       )}
 
       </>)}
+
+      {/* ── RELOAD CONFIRM MODAL ── */}
+      {showReloadConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-6">
+          <div className="w-full max-w-xs rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl p-4 space-y-3">
+            <p className="text-zinc-100 font-medium text-sm">Reload this tab?</p>
+            <p className="text-zinc-400 text-xs leading-relaxed">
+              The page will reload and Easy Apply will re-read the job details automatically.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { setShowReloadConfirm(false); reloadAndRetry() }}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded bg-blue-600 hover:bg-blue-500 text-xs font-medium transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Reload
+              </button>
+              <button
+                onClick={() => setShowReloadConfirm(false)}
+                className="flex-1 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-xs transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Version + feedback row */}
       <div className="px-3 pb-2 pt-1 flex items-center justify-between shrink-0">

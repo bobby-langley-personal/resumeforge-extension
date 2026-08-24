@@ -97,9 +97,10 @@ The Chrome Web Store approval process takes days. Always assume users are runnin
 |---------|-----------|-------------|
 | v0.2.0 | Initial paywall-free release | Likely approved |
 | v0.3.0 | Stripe paywall enforcement | Submitted / pending |
-| v0.3.1 | **Fix auth**: Bearer token from cookies; session-expiry error handling | **Submit immediately** |
+| v0.3.1 | **Fix auth**: Bearer token from cookies; session-expiry error handling | Approved |
+| v0.3.6 | **Billing sync**: weekly resume counter (`weekly_resume_count/5`) + live countdown from `weekly_window_ends_at`; updated `BillingStatus` type with all new fields; paywall copy updated | **Submit** |
 
-v0.3.1 fixes a critical auth regression affecting all users on v0.3.0 and earlier — the `credentials: 'include'` mechanism was being rejected by Clerk's CSRF check. Prioritize getting this approved.
+v0.3.6 syncs the extension billing widget with the webapp's rolling 7-day window model. The old `tailored_resume_count/3` display is replaced with `weekly_resume_count/5 free this week · resets in Xh Ym`.
 
 ---
 

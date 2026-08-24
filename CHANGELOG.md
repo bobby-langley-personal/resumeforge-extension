@@ -8,6 +8,28 @@ Paste the **"What's new"** block for each version into the Store listing's "What
 
 ---
 
+## [0.3.5] — 2026-06-16
+
+> **What's new in this version (Chrome Web Store)**
+> - LinkedIn job title and company now extract correctly on the split-pane search results page (fixes blank title / wrong company like "Amazon.com Services")
+> - "Reload tab & retry" now shows a confirmation modal so you can choose to reload or cancel instead of the tab reloading immediately
+> - Follow-up Questions view now has a footer with "Back" and "New questions" buttons — no more hunting for the tiny arrow when scrolled down through answers
+
+### Fixed
+- **LinkedIn scraper** — job title and company were missing or wrong on the `/jobs/search` split-pane view (`currentJobId` param). Root causes fixed:
+  - Page title parsing switched from `at`-regex to `|`-split to match LinkedIn's actual format (`"Job Title | Company | LinkedIn"`)
+  - Removed generic `h2` selectors that matched "Are these results helpful?" from the search results list instead of the detail panel
+  - Added `a[href*="/jobs/view/"]` as a stable fallback selector for the job title link (resilient to LinkedIn's obfuscated class names)
+
+### Added
+- **Reload confirm modal** — clicking "Reload tab & retry" in the error banner now shows a modal with Reload / Cancel buttons instead of immediately reloading the tab
+- Sticky footer in the Follow-up Questions view with "← Back" (returns to main résumé view) and "New questions" (clears answers and input to start fresh) buttons
+
+### Changed
+- Scraping hint below "Read job from this page" upgraded from tiny grey text to an amber-bordered warning banner, centered and visible halfway down the screen
+
+---
+
 ## [0.3.4] — 2026-06-16
 
 > **What's new in this version (Chrome Web Store)**

@@ -49,6 +49,11 @@ export interface BillingStatus {
   subscription_status: 'free' | 'pro' | 'canceled'
   subscription_period_end: string | null
   tailored_resume_count: number
+  weekly_resume_count: number
+  weekly_window_ends_at: string | null
+  chat_unlocked_count: number
+  interview_prep_count: number
+  experience_interview_count: number
 }
 
 // Background message types
@@ -61,6 +66,7 @@ export type BgMessage =
   | { type: 'PARSE_JOB'; payload: { jobDescription: string } }
   | { type: 'ANSWER_QUESTIONS'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; questions: string[] } }
   | { type: 'SUBMIT_FEEDBACK'; payload: { type: 'general' | 'bug'; message: string; anonymous: boolean; source: 'extension' } }
+  | { type: 'SCRAPE_REPORT'; payload: { platform: string; hasTitle: boolean; hasCompany: boolean; hasDescription: boolean; descriptionLength: number; method: string } }
 
 export type BgResponse<T = unknown> =
   | { data: T }
