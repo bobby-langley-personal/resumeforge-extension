@@ -310,6 +310,7 @@ export default function App() {
 
   // Result actions
   const [downloading, setDownloading] = useState(false)
+  const [downloadingDocx, setDownloadingDocx] = useState(false)
   const [downloadingCoverLetter, setDownloadingCoverLetter] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   // Gap analysis
@@ -705,6 +706,38 @@ export default function App() {
     }
   }
 
+  async function downloadDocx() {
+    if (!applicationId) {
+      window.open(`${API_BASE}/dashboard`, '_blank')
+      return
+    }
+    setDownloadingDocx(true)
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'DOWNLOAD_DOCX',
+        payload: { applicationId },
+      }) as { data: string; filename: string } | { error: number | string }
+
+      if ('error' in response) {
+        window.open(`${API_BASE}/dashboard`, '_blank')
+        return
+      }
+
+      const blob = new Blob(
+        [Uint8Array.from(atob(response.data), (c) => c.charCodeAt(0))],
+        { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+      )
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = response.filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setDownloadingDocx(false)
+    }
+  }
+
   function reset() {
     portRef.current?.disconnect()
     titleManuallyEdited.current = false
@@ -722,6 +755,7 @@ export default function App() {
     setShowFitView(false)
     setShowQAView(false)
     setShowPaywall(false)
+    setDownloadingDocx(false)
     setDownloadingCoverLetter(false)
     setDetectedQuestions([])
     setQaInput('')
@@ -1403,12 +1437,22 @@ export default function App() {
                   </button>
                   <button
                     onClick={downloadPdf}
-                    disabled={downloading}
+                    disabled={downloading || downloadingDocx}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-medium transition-colors"
                   >
                     {downloading
                       ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Downloading…</>
-                      : <><Download className="w-3.5 h-3.5" />Download PDF</>
+                      : <><Download className="w-3.5 h-3.5" />PDF</>
+                    }
+                  </button>
+                  <button
+                    onClick={downloadDocx}
+                    disabled={downloading || downloadingDocx}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs transition-colors"
+                  >
+                    {downloadingDocx
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Downloading…</>
+                      : <><Download className="w-3.5 h-3.5" />DOCX</>
                     }
                   </button>
                 </div>

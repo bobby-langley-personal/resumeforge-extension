@@ -280,6 +280,30 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
       .catch((e: Error) => sendResponse({ error: e.message }))
     return true
   }
+
+  if (message.type === 'DOWNLOAD_DOCX') {
+    const { applicationId, docType = 'resume' } = message.payload
+    getBgHeaders()
+      .then(headers =>
+        fetch(`${API_BASE}/api/download-docx/${docType}`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify({ applicationId }),
+        })
+      )
+      .then(async res => {
+        if (!res.ok) return sendResponse({ error: res.status })
+        const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+?)"/)?.[1] ?? 'Resume.docx'
+        const buffer = await res.arrayBuffer()
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        bytes.forEach(b => (binary += String.fromCharCode(b)))
+        sendResponse({ data: btoa(binary), filename })
+      })
+      .catch((e: Error) => sendResponse({ error: e.message }))
+    return true
+  }
 })
 
 // ── Streaming generation ────────────────────────────────────────────────────
