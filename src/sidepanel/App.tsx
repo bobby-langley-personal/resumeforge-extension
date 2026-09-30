@@ -1440,6 +1440,9 @@ export default function App() {
 
               {/* Actions */}
               <div className="p-3 border-t border-zinc-800 flex flex-col gap-2 shrink-0">
+                {error && (
+                  <p className="text-red-400 text-xs text-center leading-snug">{error}</p>
+                )}
                 <div className="flex gap-2">
                   <button
                     onClick={openPreview}
