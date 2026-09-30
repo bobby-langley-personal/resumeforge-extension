@@ -81,6 +81,7 @@ export interface StreamEvent {
   resumeText?: string
   coverLetterText?: string
   applicationId?: string
+  message?: string
 }
 
 export type PortOutMessage =

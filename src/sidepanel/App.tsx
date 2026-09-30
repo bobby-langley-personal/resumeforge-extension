@@ -617,6 +617,7 @@ export default function App() {
     portRef.current = port
 
     let finished = false
+    let gotDone = false
 
     port.onDisconnect.addListener(() => {
       if (!finished && !cancelledRef.current) {
@@ -629,10 +630,19 @@ export default function App() {
       if (msg.type === 'chunk') {
         const ev = msg.event
         if (ev.type === 'cover_letter_chunk' && ev.content) setCoverLetter((p) => p + ev.content)
+        if (ev.type === 'error') {
+          finished = true
+          clearInterval(timerRef.current!)
+          port.disconnect()
+          setError(ev.message || 'Generation failed. Please try again.')
+          setStep('scrape')
+          return
+        }
         if (ev.type === 'done') {
           // Final done event carries full text + applicationId
           if (ev.coverLetterText) setCoverLetter(ev.coverLetterText)
           if (ev.applicationId) setApplicationId(ev.applicationId)
+          gotDone = true
           finished = true
           clearInterval(timerRef.current!)
           port.disconnect()
@@ -640,12 +650,17 @@ export default function App() {
           loadBilling()
         }
       } else if (msg.type === 'done') {
-        // Stream ended without a done event — mark complete anyway
+        // Stream closed — only mark complete if a real done event was received
         finished = true
         clearInterval(timerRef.current!)
         port.disconnect()
-        setStep('done')
-        loadBilling()
+        if (gotDone) {
+          setStep('done')
+          loadBilling()
+        } else {
+          setError('Generation did not complete. Please try again.')
+          setStep('scrape')
+        }
       } else if (msg.type === 'error') {
         finished = true
         clearInterval(timerRef.current!)
@@ -676,7 +691,7 @@ export default function App() {
 
   async function downloadPdf() {
     if (!applicationId) {
-      window.open(`${API_BASE}/dashboard`, '_blank')
+      setError('Resume not ready — please try generating again.')
       return
     }
     setDownloading(true)
@@ -687,7 +702,7 @@ export default function App() {
       }) as { data: string; filename: string } | { error: number | string }
 
       if ('error' in response) {
-        window.open(`${API_BASE}/dashboard`, '_blank')
+        setError('Could not download the PDF. Please try again.')
         return
       }
 
@@ -708,7 +723,7 @@ export default function App() {
 
   async function downloadDocx() {
     if (!applicationId) {
-      window.open(`${API_BASE}/dashboard`, '_blank')
+      setError('Resume not ready — please try generating again.')
       return
     }
     setDownloadingDocx(true)
@@ -719,7 +734,7 @@ export default function App() {
       }) as { data: string; filename: string } | { error: number | string }
 
       if ('error' in response) {
-        window.open(`${API_BASE}/dashboard`, '_blank')
+        setError('Could not download the DOCX. Please try again.')
         return
       }
 
@@ -813,7 +828,7 @@ export default function App() {
       }) as { data: string; filename: string } | { error: number | string }
 
       if ('error' in response) {
-        window.open(`${API_BASE}/dashboard`, '_blank')
+        setError('Could not download the cover letter. Please try again.')
         return
       }
 
@@ -842,7 +857,7 @@ export default function App() {
       }) as { data: string } | { error: number | string }
 
       if ('error' in response) {
-        window.open(`${API_BASE}/dashboard`, '_blank')
+        setError('Could not load the preview. Please try again.')
         return
       }
       await chrome.storage.local.set({ easy_apply_pdf_preview: response.data })
