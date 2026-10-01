@@ -1108,12 +1108,14 @@ export default function App() {
 
           {billing && billing.subscription_status !== 'pro' && (
             <div className="w-full flex items-center justify-between gap-3 rounded border border-zinc-800 bg-zinc-900/60 px-3 py-2">
-              <span className="text-zinc-500 text-xs">
-                {billing.weekly_resume_count}/5 free this week{' '}
+              <div className="flex flex-col gap-0.5">
+                <span className="text-zinc-500 text-xs">{billing.weekly_resume_count}/5 free this week</span>
                 {billing.weekly_window_ends_at && (
-                  <CountdownLabel endsAt={billing.weekly_window_ends_at} />
+                  <span className="text-zinc-600 text-xs whitespace-nowrap">
+                    <CountdownLabel endsAt={billing.weekly_window_ends_at} />
+                  </span>
                 )}
-              </span>
+              </div>
               <a
                 href={`${API_BASE}/pricing`}
                 target="_blank"
