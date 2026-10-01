@@ -183,45 +183,92 @@ function scrapePageContent(): ScrapedJob & { method?: string } {
       url,
     }
   }
-  if (url.includes('indeed.com')) {
-    const pick = (...selectors: string[]) => {
-      for (const sel of selectors) {
-        const el = document.querySelector(sel)
-        const text = el?.textContent?.trim()
-        if (text) return text
-      }
-      return undefined
-    }
-    return {
-      title: pick(
-        '[data-testid="jobsearch-JobInfoHeader-title"]',
-        '.jobsearch-JobInfoHeader-title',
-        'h1',
-      )?.replace(/\s*-\s*job\s*post\s*$/i, '').trim(),
-      company: pick(
-        '[data-testid="inlineHeader-companyName"]',
-        '.jobsearch-InlineCompanyRating-companyHeader a',
-        '.jobsearch-CompanyInfoWithoutHeaderImage a',
-      ),
-      description: pick(
-        '#jobDescriptionText',
-        '.jobsearch-jobDescriptionText',
-      ),
-      url,
+  // ── Universal extraction: works for Indeed, Glassdoor, Monster, ZipRecruiter, and any job board ──
+  // Instead of per-site CSS selectors (which break when sites update), use text anchors
+  // that are stable across all job boards: "Full job description", "About the role", etc.
+  const getText = (el: Element | null) => ((el as HTMLElement)?.innerText || el?.textContent || '').trim()
+
+  // 1. Find the detail/viewjob panel — try generic selectors, fall back to body
+  const detailPanel: Element =
+    document.querySelector('[id*="viewjob"]') ||
+    document.querySelector('[id*="ViewJob"]') ||
+    document.querySelector('[class*="jobsearch-RightPane"]') ||
+    document.querySelector('[data-testid*="viewjob"]') ||
+    document.querySelector('[class*="job-description"]') ||
+    document.querySelector('[class*="jobDescription"]') ||
+    document.querySelector('[id*="job-description"]') ||
+    document.querySelector('[id*="jobDescription"]') ||
+    document.querySelector('article') ||
+    document.querySelector('main') ||
+    document.body
+
+  // 2. Extract description via universal text anchors (order = most specific first)
+  const descAnchors = [
+    /Full\s+job\s+description/i,
+    /Job\s+Description/i,
+    /About\s+the\s+role/i,
+    /About\s+this\s+job/i,
+    /About\s+the\s+job/i,
+    /What\s+you['']ll\s+do/i,
+    /The\s+Role/i,
+    /Responsibilities/i,
+    /Description/i,
+  ]
+  const panelText = getText(detailPanel)
+  let description: string | undefined
+  let method = 'universal-panel'
+  for (const anchor of descAnchors) {
+    const idx = panelText.search(anchor)
+    if (idx >= 0) {
+      description = panelText.slice(idx, idx + 8000)
+      method = 'universal-text-anchor'
+      break
     }
   }
-  // Generic fallback — try to extract company/title from common page title patterns
-  // e.g. "Role at Company", "Role | Company", "Role - Company"
+  // If no anchor found but panel has substantial text, use it
+  if (!description && panelText.length > 300) {
+    description = panelText.slice(0, 8000)
+    method = 'universal-panel-text'
+  }
+
+  // 3. Title — try common selectors scoped to detail panel, then page-level
+  const title =
+    getText(detailPanel.querySelector('[data-testid*="job-title"]')) ||
+    getText(detailPanel.querySelector('[data-testid*="jobTitle"]')) ||
+    getText(detailPanel.querySelector('h1')) ||
+    getText(detailPanel.querySelector('h2')) ||
+    undefined
+
+  // 4. Company — try detail panel first, then document-wide (some sites render
+  //    company outside the viewjob panel, e.g. Indeed's left-side cards)
+  const company =
+    getText(detailPanel.querySelector('[data-testid="company-name"]')) ||
+    getText(detailPanel.querySelector('[class*="company-name"]')) ||
+    getText(detailPanel.querySelector('[class*="companyName"]')) ||
+    getText(detailPanel.querySelector('a[href*="/cmp/"]')) ||
+    getText(document.querySelector('[data-testid="company-name"]')) ||
+    getText(document.querySelector('[class*="company-name"]')) ||
+    (document.querySelector('meta[property="og:site_name"]') as HTMLMetaElement)?.content ||
+    undefined
+
+  // 5. If detail panel gave us nothing useful, fall back to page title parsing + body text
   const titleText = document.title
-  // Strip known noisy suffixes like " - Indeed", " | LinkedIn", etc. before extracting
   const cleanTitle = titleText.replace(/\s*[-|–]\s*(Indeed|Glassdoor|ZipRecruiter|Monster|CareerBuilder|SimplyHired|LinkedIn)\s*$/i, '').trim()
   const companyFromTitle = cleanTitle.match(/(?:\s+(?:at|@)\s+|\s*[|\-–]\s*)([^|\-–]+)$/i)?.[1]?.trim()
   const jobTitleFromTitle = cleanTitle.match(/^([^|\-–@]+?)(?:\s+(?:at|@)\s+|\s*[|\-–])/i)?.[1]?.trim() ?? cleanTitle
+
+  if (!description) {
+    // Last resort: body innerText
+    description = document.body.innerText.slice(0, 5000) || undefined
+    method = 'body-fallback'
+  }
+
   return {
-    title: jobTitleFromTitle,
-    company: companyFromTitle,
-    description: document.body.innerText.slice(0, 5000),
+    title: title || jobTitleFromTitle,
+    company: company || companyFromTitle,
+    description,
     url,
+    method,
   }
 }
 
@@ -233,9 +280,12 @@ function CountdownLabel({ endsAt }: { endsAt: string }) {
     function compute() {
       const diff = new Date(endsAt).getTime() - Date.now()
       if (diff <= 0) { setLabel(''); return }
-      const h = Math.floor(diff / 3600000)
+      const d = Math.floor(diff / 86400000)
+      const h = Math.floor((diff % 86400000) / 3600000)
       const m = Math.floor((diff % 3600000) / 60000)
-      setLabel(h > 0 ? `${h}h ${m}m` : `${m}m`)
+      if (d > 0) setLabel(`${d}d ${h}h ${m}m`)
+      else if (h > 0) setLabel(`${h}h ${m}m`)
+      else setLabel(`${m}m`)
     }
     compute()
     const id = setInterval(compute, 60000)
@@ -310,7 +360,7 @@ export default function App() {
 
   // Result actions
   const [downloading, setDownloading] = useState(false)
-  const [downloadingDocx, setDownloadingDocx] = useState(false)
+
   const [downloadingCoverLetter, setDownloadingCoverLetter] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   // Gap analysis
@@ -483,6 +533,25 @@ export default function App() {
           method: (scraped as any).method ?? 'selector',
         },
       }).catch(() => {})
+
+      // Server-side fallback for non-auth sites only (company career pages, etc.).
+      // Auth-gated sites (Indeed, LinkedIn, Glassdoor, etc.) require a browser session
+      // so server-side fetch would just hit a login wall.
+      const authGatedSites = ['indeed.com', 'linkedin.com', 'glassdoor.com', 'ziprecruiter.com', 'monster.com']
+      const isAuthGated = authGatedSites.some(d => (scraped.url ?? '').includes(d))
+      if (!isAuthGated && (scraped.description?.length ?? 0) < 200 && scraped.url) {
+        try {
+          const fetchResult = await chrome.runtime.sendMessage({
+            type: 'FETCH_JOB_POSTING',
+            payload: { url: scraped.url },
+          }) as { data?: { jobDescription?: string; company?: string; jobTitle?: string } } | { error: unknown }
+          if (!('error' in fetchResult) && fetchResult.data?.jobDescription) {
+            scraped.description = fetchResult.data.jobDescription
+            if (!scraped.title && fetchResult.data.jobTitle) scraped.title = fetchResult.data.jobTitle
+            if (!scraped.company && fetchResult.data.company) scraped.company = fetchResult.data.company
+          }
+        } catch { /* server-side fetch failed, continue with what we have */ }
+      }
 
       titleManuallyEdited.current = false
       companyManuallyEdited.current = false
@@ -721,37 +790,6 @@ export default function App() {
     }
   }
 
-  async function downloadDocx() {
-    if (!applicationId) {
-      setError('Resume not ready — please try generating again.')
-      return
-    }
-    setDownloadingDocx(true)
-    try {
-      const response = await chrome.runtime.sendMessage({
-        type: 'DOWNLOAD_DOCX',
-        payload: { applicationId },
-      }) as { data: string; filename: string } | { error: number | string }
-
-      if ('error' in response) {
-        setError('Could not download the DOCX. Please try again.')
-        return
-      }
-
-      const blob = new Blob(
-        [Uint8Array.from(atob(response.data), (c) => c.charCodeAt(0))],
-        { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
-      )
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = response.filename
-      a.click()
-      URL.revokeObjectURL(url)
-    } finally {
-      setDownloadingDocx(false)
-    }
-  }
 
   function reset() {
     portRef.current?.disconnect()
@@ -770,7 +808,6 @@ export default function App() {
     setShowFitView(false)
     setShowQAView(false)
     setShowPaywall(false)
-    setDownloadingDocx(false)
     setDownloadingCoverLetter(false)
     setDetectedQuestions([])
     setQaInput('')
@@ -1070,7 +1107,7 @@ export default function App() {
           ) : null}
 
           {billing && billing.subscription_status !== 'pro' && (
-            <div className="w-full flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/60 px-3 py-2">
+            <div className="w-full flex items-center justify-between gap-3 rounded border border-zinc-800 bg-zinc-900/60 px-3 py-2">
               <span className="text-zinc-500 text-xs">
                 {billing.weekly_resume_count}/5 free this week{' '}
                 {billing.weekly_window_ends_at && (
@@ -1081,7 +1118,7 @@ export default function App() {
                 href={`${API_BASE}/pricing`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-amber-400 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
+                className="shrink-0 text-amber-400 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
               >
                 <Crown className="w-3 h-3" />
                 Upgrade
@@ -1455,22 +1492,12 @@ export default function App() {
                   </button>
                   <button
                     onClick={downloadPdf}
-                    disabled={downloading || downloadingDocx}
+                    disabled={downloading}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-medium transition-colors"
                   >
                     {downloading
                       ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Downloading…</>
                       : <><Download className="w-3.5 h-3.5" />PDF</>
-                    }
-                  </button>
-                  <button
-                    onClick={downloadDocx}
-                    disabled={downloading || downloadingDocx}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs transition-colors"
-                  >
-                    {downloadingDocx
-                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Downloading…</>
-                      : <><Download className="w-3.5 h-3.5" />DOCX</>
                     }
                   </button>
                 </div>

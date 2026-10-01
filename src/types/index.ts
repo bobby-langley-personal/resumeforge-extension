@@ -68,6 +68,7 @@ export type BgMessage =
   | { type: 'ANSWER_QUESTIONS'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; questions: string[] } }
   | { type: 'SUBMIT_FEEDBACK'; payload: { type: 'general' | 'bug'; message: string; anonymous: boolean; source: 'extension' } }
   | { type: 'SCRAPE_REPORT'; payload: { platform: string; hasTitle: boolean; hasCompany: boolean; hasDescription: boolean; descriptionLength: number; method: string } }
+  | { type: 'FETCH_JOB_POSTING'; payload: { url: string } }
 
 export type BgResponse<T = unknown> =
   | { data: T }

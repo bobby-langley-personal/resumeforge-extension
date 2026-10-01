@@ -243,6 +243,28 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
     return false
   }
 
+  if (message.type === 'FETCH_JOB_POSTING') {
+    fetchFromTab('/api/fetch-job-posting', { method: 'POST', body: JSON.stringify(message.payload) })
+      .then(result => {
+        if (result == null) {
+          return getBgHeaders().then(headers =>
+            fetch(`${API_BASE}/api/fetch-job-posting`, { method: 'POST', headers, credentials: 'include', body: JSON.stringify(message.payload) })
+              .then(async r => {
+                if (r.status === 401) return sendResponse({ error: 401 })
+                if (!r.ok) return sendResponse({ error: r.status })
+                sendResponse({ data: await r.json() })
+              })
+              .catch((e: Error) => sendResponse({ error: e.message }))
+          )
+        }
+        const r = result as Record<string, unknown>
+        if ('__error' in r) return sendResponse({ error: r.__error })
+        sendResponse({ data: result })
+      })
+      .catch((e: Error) => sendResponse({ error: e.message }))
+    return true
+  }
+
   if (message.type === 'SUBMIT_FEEDBACK') {
     getBgHeaders().then(headers =>
       fetch(`${API_BASE}/api/feedback`, {
