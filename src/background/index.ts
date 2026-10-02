@@ -243,6 +243,28 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
     return false
   }
 
+  if (message.type === 'FETCH_JOB_POSTING') {
+    fetchFromTab('/api/fetch-job-posting', { method: 'POST', body: JSON.stringify(message.payload) })
+      .then(result => {
+        if (result == null) {
+          return getBgHeaders().then(headers =>
+            fetch(`${API_BASE}/api/fetch-job-posting`, { method: 'POST', headers, credentials: 'include', body: JSON.stringify(message.payload) })
+              .then(async r => {
+                if (r.status === 401) return sendResponse({ error: 401 })
+                if (!r.ok) return sendResponse({ error: r.status })
+                sendResponse({ data: await r.json() })
+              })
+              .catch((e: Error) => sendResponse({ error: e.message }))
+          )
+        }
+        const r = result as Record<string, unknown>
+        if ('__error' in r) return sendResponse({ error: r.__error })
+        sendResponse({ data: result })
+      })
+      .catch((e: Error) => sendResponse({ error: e.message }))
+    return true
+  }
+
   if (message.type === 'SUBMIT_FEEDBACK') {
     getBgHeaders().then(headers =>
       fetch(`${API_BASE}/api/feedback`, {
@@ -271,6 +293,30 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
       .then(async res => {
         if (!res.ok) return sendResponse({ error: res.status })
         const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+?)"/)?.[1] ?? 'Resume.pdf'
+        const buffer = await res.arrayBuffer()
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        bytes.forEach(b => (binary += String.fromCharCode(b)))
+        sendResponse({ data: btoa(binary), filename })
+      })
+      .catch((e: Error) => sendResponse({ error: e.message }))
+    return true
+  }
+
+  if (message.type === 'DOWNLOAD_DOCX') {
+    const { applicationId, docType = 'resume' } = message.payload
+    getBgHeaders()
+      .then(headers =>
+        fetch(`${API_BASE}/api/download-docx/${docType}`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify({ applicationId }),
+        })
+      )
+      .then(async res => {
+        if (!res.ok) return sendResponse({ error: res.status })
+        const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+?)"/)?.[1] ?? 'Resume.docx'
         const buffer = await res.arrayBuffer()
         const bytes = new Uint8Array(buffer)
         let binary = ''

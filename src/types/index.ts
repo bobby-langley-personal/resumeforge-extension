@@ -62,11 +62,13 @@ export type BgMessage =
   | { type: 'FETCH_RESUMES' }
   | { type: 'FETCH_BILLING_STATUS' }
   | { type: 'DOWNLOAD_PDF'; payload: { applicationId: string; docType?: 'resume' | 'cover-letter' } }
+  | { type: 'DOWNLOAD_DOCX'; payload: { applicationId: string; docType?: 'resume' | 'cover-letter' } }
   | { type: 'ANALYZE_FIT'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; additionalContext?: { title: string; type: string; text: string }[] } }
   | { type: 'PARSE_JOB'; payload: { jobDescription: string } }
   | { type: 'ANSWER_QUESTIONS'; payload: { company: string; jobTitle: string; jobDescription: string; backgroundExperience: string; questions: string[] } }
   | { type: 'SUBMIT_FEEDBACK'; payload: { type: 'general' | 'bug'; message: string; anonymous: boolean; source: 'extension' } }
   | { type: 'SCRAPE_REPORT'; payload: { platform: string; hasTitle: boolean; hasCompany: boolean; hasDescription: boolean; descriptionLength: number; method: string } }
+  | { type: 'FETCH_JOB_POSTING'; payload: { url: string } }
 
 export type BgResponse<T = unknown> =
   | { data: T }
@@ -80,6 +82,7 @@ export interface StreamEvent {
   resumeText?: string
   coverLetterText?: string
   applicationId?: string
+  message?: string
 }
 
 export type PortOutMessage =
